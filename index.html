@@ -263,23 +263,27 @@
     </div>
   </div>
 
-  <!-- Running Contract Value -->
-<div id="contract-summary" class="company-form" style="margin-bottom: 28px; padding: 20px 24px;">
+ <div id="contract-summary" class="company-form" style="margin-bottom: 28px; padding: 20px 24px;">
   <h3 style="margin-bottom: 16px;">Contract Summary</h3>
+
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
     <div>
       <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Original Quotation</p>
       <div id="summary-original">RM 0.00</div>
     </div>
+
     <div>
       <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Approved Variation Orders</p>
       <div id="summary-vo">RM 0.00</div>
     </div>
+
     <div>
       <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Current Contract Value</p>
       <p id="summary-total" style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">RM 0.00</p>
     </div>
   </div>
+
+  <div id="summary-approved-vos" style="margin-top:20px;"></div>
 </div>
 
   <!-- Quotation List -->
@@ -299,8 +303,10 @@
   </div>
 
   <div id="vo-list" class="projects-list" style="margin-top:16px;">
-    <!-- VOs will load here -->
-  </div>
+  <!-- VOs will load here -->
+</div>
+
+<div id="vo-view-container" class="hidden"></div>
 </div>
 
 <!-- Create / Edit VO Form -->

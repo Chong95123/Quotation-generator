@@ -1142,7 +1142,7 @@ await updateContractSummary(currentProjectId);
 function openVoForm(vo = null) {
   currentVoId = vo ? vo.id : null;
   const container = document.getElementById("vo-form-container");
-  container.classList.remove("hidden");
+container.classList.remove("hidden");
 
   document.getElementById("vo-form-title").textContent = vo ? "Edit Variation Order" : "New Variation Order";
   document.getElementById("vo-title").value = vo?.title || "";
@@ -1262,10 +1262,10 @@ async function saveVo() {
     const desc = tr.querySelector(".vo-desc").value.trim();
     if (!itemName && !desc) return;
 
-    const qty = parseFloat(tr.querySelector(".vo-qty").value) || 0;
-    const price = parseFloat(tr.querySelector(".vo-price").value) || 0;
-    let amount = qty * price;
+    const quantity = parseFloat(tr.querySelector(".vo-qty").value) || 0;
+    const unitPrice = parseFloat(tr.querySelector(".vo-price").value) || 0;
     const changeType = tr.querySelector(".vo-change-type").value;
+    let amount = quantity * unitPrice;
 
     if (changeType === "omit") amount = -Math.abs(amount);
 
@@ -1273,45 +1273,76 @@ async function saveVo() {
       item_name: itemName,
       description: desc,
       unit: tr.querySelector(".vo-unit").value.trim() || "pcs",
-      quantity: qty,
-      unit_price: price,
-      amount: amount,
+      quantity,
+      unit_price: unitPrice,
+      amount,
       section: tr.querySelector(".vo-section").value.trim() || "General",
       change_type: changeType,
       sort_order: index
     });
   });
 
-  if (items.length === 0) return alert("Please add at least one item");
+  if (items.length === 0) {
+    return alert("Please add at least one item");
+  }
 
-  const totalAmount = items.reduce((sum, i) => sum + i.amount, 0);
-  const title = document.getElementById("vo-title").value.trim() || "Variation Order";
+  const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+  const title =
+    document.getElementById("vo-title").value.trim() || "Variation Order";
   const notes = document.getElementById("vo-notes").value.trim();
 
-  const voNumber = await generateVoNumber();
+  let voId = currentVoId;
 
-  const { data: vo, error } = await supabaseClient
-    .from("variation_orders")
-    .insert([{
-      project_id: currentProjectId,
-      user_id: user.id,
-      vo_number: voNumber,
-      title: title,
-      status: "draft",
-      total_amount: totalAmount,
-      notes: notes
-    }])
-    .select()
-    .single();
+  if (voId) {
+    const { error } = await supabaseClient
+      .from("variation_orders")
+      .update({
+        title,
+        notes,
+        total_amount: totalAmount,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", voId);
 
-  if (error) {
-    console.error(error);
-    return alert("Failed to save VO: " + error.message);
+    if (error) {
+      return alert("Failed to update VO: " + error.message);
+    }
+
+    const { error: deleteError } = await supabaseClient
+      .from("vo_items")
+      .delete()
+      .eq("vo_id", voId);
+
+    if (deleteError) {
+      return alert("Failed to replace VO items: " + deleteError.message);
+    }
+  } else {
+    const voNumber = await generateVoNumber();
+
+    const { data: vo, error } = await supabaseClient
+      .from("variation_orders")
+      .insert([{
+        project_id: currentProjectId,
+        user_id: user.id,
+        vo_number: voNumber,
+        title,
+        status: "draft",
+        total_amount: totalAmount,
+        notes
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      return alert("Failed to save VO: " + error.message);
+    }
+
+    voId = vo.id;
   }
 
   const itemsWithId = items.map(item => ({
     ...item,
-    vo_id: vo.id
+    vo_id: voId
   }));
 
   const { error: itemsError } = await supabaseClient
@@ -1319,13 +1350,13 @@ async function saveVo() {
     .insert(itemsWithId);
 
   if (itemsError) {
-    console.error(itemsError);
     return alert("Failed to save VO items: " + itemsError.message);
   }
 
-  alert(`VO saved successfully!\nVO Number: ${voNumber}`);
+  alert(currentVoId ? "VO updated successfully!" : "VO saved successfully!");
   closeVoForm();
-  loadVos(currentProjectId);
+  await loadVos(currentProjectId);
+  await updateContractSummary(currentProjectId);
 }
 
 async function loadVos(projectId) {
@@ -1467,21 +1498,21 @@ async function viewVo(voId) {
     </div>
   `;
 
-  const container = document.getElementById("vo-form-container");
+  const container = document.getElementById("vo-view-container");
   container.classList.remove("hidden");
   container.innerHTML = html;
   container.scrollIntoView({ behavior: "smooth" });
 }
 
 function closeVoView() {
-  const container = document.getElementById("vo-form-container");
+  const container = document.getElementById("vo-view-container");
   container.classList.add("hidden");
-  container.innerHTML = "";   // clear view content only
+  container.innerHTML = "";
 
-  // Re-load the lists so everything appears again
   if (currentProjectId) {
     loadQuotations(currentProjectId);
     loadVos(currentProjectId);
+    updateContractSummary(currentProjectId);
   }
 }
 
@@ -1503,8 +1534,13 @@ async function changeVoStatus(voId, newStatus) {
   }
 
   alert(`VO status changed to ${newStatus.toUpperCase()}`);
-  closeVoView();
-  loadVos(currentProjectId);
+
+const viewContainer = document.getElementById("vo-view-container");
+viewContainer.classList.add("hidden");
+viewContainer.innerHTML = "";
+
+await loadVos(currentProjectId);
+await updateContractSummary(currentProjectId);
 }
 
 
@@ -1598,73 +1634,110 @@ async function editVo(voId) {
 
   if (itemsError) return alert("Failed to load items");
 
-  // Open form
-  const container = document.getElementById("vo-form-container");
-  container.classList.remove("hidden");
-  document.getElementById("vo-form-title").textContent = `Edit ${vo.vo_number}`;
-  document.getElementById("vo-title").value = vo.title || "";
-  document.getElementById("vo-notes").value = vo.notes || "";
-
-  // Clear and load items
+    openVoForm(vo);
   document.getElementById("vo-items-body").innerHTML = "";
+
   if (items && items.length > 0) {
     items.forEach(item => addVoItemRow(item));
   } else {
     addVoItemRow();
   }
-  updateVoTotal();
 
+  updateVoTotal();
+}
+
+
+async function editQuotation(quotationId) {
+  const { data: quotation, error } = await supabaseClient
+    .from("quotations")
+    .select("*")
+    .eq("id", quotationId)
+    .single();
+
+  if (error) {
+    alert("Failed to load quotation: " + error.message);
+    return;
+  }
+
+  const { data: items, error: itemsError } = await supabaseClient
+    .from("quotation_items")
+    .select("*")
+    .eq("quotation_id", quotationId)
+    .order("sort_order");
+
+  if (itemsError) {
+    alert("Failed to load quotation items: " + itemsError.message);
+    return;
+  }
+
+  currentQuotationId = quotationId;
+  document.getElementById("quotation-form-title").textContent =
+    `Edit ${quotation.quotation_no || "Quotation"} v${quotation.version_no}`;
+  document.getElementById("quotation-prepared-by").value =
+    quotation.prepared_by || "";
+  document.getElementById("quotation-notes").value =
+    quotation.notes || "";
+
+  const container = document.getElementById("quotation-form-container");
+  container.classList.remove("hidden");
+
+  const tbody = document.getElementById("items-body");
+  tbody.innerHTML = "";
+
+  (items || []).forEach(item => addItemRow(item));
+  if (!items || items.length === 0) addItemRow();
+
+  updateQuotationTotal();
   container.scrollIntoView({ behavior: "smooth" });
 }
+
 
 // ====================== Update Contract Summary ======================
 
 async function updateContractSummary(projectId) {
-  // ========== 1. Get Quotations ==========
   const { data: quotations, error: qError } = await supabaseClient
     .from("quotations")
     .select("id, total_amount, status, version_no, quotation_no")
     .eq("project_id", projectId)
     .order("version_no", { ascending: false });
 
+  if (qError) {
+    console.error("Failed to load quotations for summary:", qError);
+    return;
+  }
+
   let originalAmount = 0;
   let originalLabel = "No quotation yet";
 
   if (quotations && quotations.length > 0) {
-    // First try to find an approved quotation (take the latest approved)
-    const approvedList = quotations.filter(q => q.status === "approved");
-    
-    if (approvedList.length > 0) {
-      // Use the highest version among approved
-      const bestApproved = approvedList[0]; // already sorted by version_no desc
-      originalAmount = Number(bestApproved.total_amount) || 0;
-      originalLabel = `${bestApproved.quotation_no || ""} v${bestApproved.version_no} (Approved)`;
-    } else {
-      // No approved → use the latest version (highest version_no)
-      const latest = quotations[0];
-      originalAmount = Number(latest.total_amount) || 0;
-      originalLabel = `${latest.quotation_no || ""} v${latest.version_no} (${latest.status})`;
-    }
+    const approvedQuotation = quotations.find(q => q.status === "approved");
+    const selectedQuotation = approvedQuotation || quotations[0];
+
+    originalAmount = Number(selectedQuotation.total_amount) || 0;
+    originalLabel = `${selectedQuotation.quotation_no || ""} v${selectedQuotation.version_no} (${selectedQuotation.status})`;
   }
 
-  // ========== 2. Get Approved VOs only ==========
   const { data: vos, error: vError } = await supabaseClient
     .from("variation_orders")
-    .select("total_amount, vo_number, status")
+    .select("total_amount, vo_number, title, status")
     .eq("project_id", projectId)
     .eq("status", "approved");
 
-  let voTotal = 0;
-  if (vos && vos.length > 0) {
-    voTotal = vos.reduce((sum, vo) => sum + (Number(vo.total_amount) || 0), 0);
+  if (vError) {
+    console.error("Failed to load approved VOs for summary:", vError);
+    return;
   }
 
+  const voTotal = (vos || []).reduce(
+    (sum, vo) => sum + (Number(vo.total_amount) || 0),
+    0
+  );
   const contractValue = originalAmount + voTotal;
 
-  // ========== 3. Update UI ==========
   const originalEl = document.getElementById("summary-original");
   const voEl = document.getElementById("summary-vo");
   const totalEl = document.getElementById("summary-total");
+  const approvedListEl = document.getElementById("summary-approved-vos");
 
   if (originalEl) {
     originalEl.innerHTML = `
@@ -1676,7 +1749,24 @@ async function updateContractSummary(projectId) {
   if (voEl) {
     voEl.innerHTML = `
       <span style="font-size:1.3rem; font-weight:700; color:#0ea5e9;">RM ${voTotal.toFixed(2)}</span>
-      <br><small style="font-size:0.75rem; color:#64748b;">${vos ? vos.length : 0} approved VO(s)</small>
+      <br><small style="font-size:0.75rem; color:#64748b;">${vos.length} approved VO(s)</small>
+    `;
+  }
+
+  if (approvedListEl) {
+    approvedListEl.innerHTML = `
+      <h4 style="margin-bottom:8px;">Approved Variation Orders</h4>
+      ${
+        vos.length
+          ? `<ul style="padding-left:20px;">
+              ${vos.map(vo => `
+                <li>${vo.vo_number || "VO"} — ${vo.title || "Variation Order"}:
+                  RM ${Number(vo.total_amount || 0).toFixed(2)}
+                </li>
+              `).join("")}
+            </ul>`
+          : "<p>No approved variation orders yet.</p>"
+      }
     `;
   }
 
