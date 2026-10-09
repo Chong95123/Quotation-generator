@@ -1,3 +1,6 @@
+let activeUserId = null;
+const FAVORITES_STORAGE_PREFIX = "quotation-system-favorites:";
+
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkUser();
 
@@ -69,6 +72,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (page === "projects") {
         loadProjects();
       }
+      if (page === "dashboard") {
+        loadDashboardStats();
+      }
+      if (page === "favourites") {
+        loadFavourites();
+      }
     });
   });
 
@@ -100,14 +109,289 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function showApp(user) {
+  activeUserId = user.id;
   document.getElementById("auth-page").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   document.getElementById("current-user-email").textContent = user.email;
+  refreshFavoritePickers();
+  loadDashboardStats();
+}
+
+async function loadDashboardStats() {
+  if (!activeUserId) return;
+
+  const projectCountEl = document.getElementById("dashboard-total-projects");
+  const pendingCountEl = document.getElementById("dashboard-pending-quotations");
+  const approvedCountEl = document.getElementById("dashboard-approved-this-month");
+  if (!projectCountEl || !pendingCountEl || !approvedCountEl) return;
+
+  // Use the user's local calendar month for the approved count.
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+  const [projectsResult, pendingResult, approvedResult] = await Promise.all([
+    supabaseClient
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", activeUserId),
+    supabaseClient
+      .from("quotations")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", activeUserId)
+      .in("status", ["draft", "adjusting"]),
+    supabaseClient
+      .from("quotations")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", activeUserId)
+      .eq("status", "approved")
+      .gte("approved_at", monthStart)
+      .lt("approved_at", nextMonthStart)
+  ]);
+
+  [
+    [projectsResult, projectCountEl, "projects"],
+    [pendingResult, pendingCountEl, "pending quotations"],
+    [approvedResult, approvedCountEl, "approved quotations"]
+  ].forEach(([result, element, label]) => {
+    if (result.error) {
+      console.error(`Failed to load ${label} dashboard count:`, result.error);
+      element.textContent = "—";
+    } else {
+      element.textContent = String(result.count || 0);
+    }
+  });
 }
 
 function showAuth() {
   document.getElementById("auth-page").classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
+}
+
+function favoriteStorageKey() {
+  return activeUserId ? FAVORITES_STORAGE_PREFIX + activeUserId : null;
+}
+
+function getFavorites() {
+  const key = favoriteStorageKey();
+  if (!key) return [];
+  try {
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } catch (error) {
+    console.error("Could not read favourites:", error);
+    return [];
+  }
+}
+
+function saveFavorites(favorites) {
+  const key = favoriteStorageKey();
+  if (!key) return alert("Please sign in to use Favourites.");
+  try {
+    localStorage.setItem(key, JSON.stringify(favorites));
+    refreshFavoritePickers();
+    loadFavourites();
+  } catch (error) {
+    console.error("Could not save favourites:", error);
+    alert("Could not save favourites in this browser.");
+  }
+}
+
+function refreshFavoritePickers() {
+  const favorites = getFavorites();
+  ["quotation-favourite-picker", "vo-favourite-picker"].forEach(id => {
+    const picker = document.getElementById(id);
+    if (!picker) return;
+    const selected = picker.value;
+    picker.replaceChildren(new Option("Choose a favourite line", ""));
+    favorites.forEach(favorite => {
+      const option = new Option(favorite.name || favorite.item_name || "Saved line", favorite.id);
+      picker.add(option);
+    });
+    if (favorites.some(favorite => favorite.id === selected)) picker.value = selected;
+  });
+}
+
+function loadFavourites() {
+  const list = document.getElementById("favourites-list");
+  if (!list) return;
+  const favorites = getFavorites();
+  list.replaceChildren();
+  refreshFavoritePickers();
+
+  if (!favorites.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No saved lines yet. Use the ☆ button beside any quotation or VO line to save one.";
+    list.appendChild(empty);
+    return;
+  }
+
+  favorites.forEach(favorite => {
+    const card = document.createElement("article");
+    card.className = "favourite-card";
+    const title = document.createElement("h3");
+    title.textContent = favorite.name || favorite.item_name || "Saved line";
+    const section = document.createElement("p");
+    section.textContent = `Section: ${favorite.section || "General"}`;
+    const description = document.createElement("p");
+    description.textContent = favorite.description || favorite.item_name || "No description";
+    const details = document.createElement("p");
+    details.textContent = `${favorite.quantity ?? 1} ${favorite.unit || "pcs"} · Unit price RM ${Number(favorite.unit_price || 0).toFixed(2)}`;
+    const actions = document.createElement("div");
+    actions.className = "favourite-actions";
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "btn-secondary";
+    editButton.textContent = "Edit";
+    editButton.addEventListener("click", () => openFavoriteEditor(card, favorite));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "btn-delete";
+    deleteButton.textContent = "Remove";
+    deleteButton.addEventListener("click", () => {
+      if (!confirm(`Remove “${favorite.name || favorite.item_name}” from Favourites?`)) return;
+      saveFavorites(getFavorites().filter(item => item.id !== favorite.id));
+    });
+
+    actions.append(editButton, deleteButton);
+    card.append(title, section, description, details, actions);
+    list.appendChild(card);
+  });
+}
+
+function openFavoriteEditor(card, favorite) {
+  card.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Edit favourite line";
+  const form = document.createElement("form");
+  form.className = "favourite-edit-form";
+
+  const addField = (labelText, key, type = "text") => {
+    const label = document.createElement("label");
+    label.className = "favourite-edit-field";
+    label.textContent = labelText;
+    const input = type === "textarea" ? document.createElement("textarea") : document.createElement("input");
+    if (type !== "textarea") input.type = type;
+    input.name = key;
+    input.value = favorite[key] ?? "";
+    if (type === "number") {
+      input.min = "0";
+      input.step = "0.01";
+    }
+    label.appendChild(input);
+    form.appendChild(label);
+  };
+
+  addField("Favourite name", "name");
+  addField("Section", "section");
+  addField("Item name", "item_name");
+  addField("Description", "description", "textarea");
+  addField("Unit", "unit");
+  addField("Quantity", "quantity", "number");
+  addField("Unit cost", "unit_cost", "number");
+  addField("Unit price", "unit_price", "number");
+
+  const changeTypeLabel = document.createElement("label");
+  changeTypeLabel.className = "favourite-edit-field";
+  changeTypeLabel.textContent = "VO change type";
+  const changeType = document.createElement("select");
+  changeType.name = "change_type";
+  [["add", "Add"], ["change", "Change"], ["omit", "Omit"]].forEach(([value, text]) => {
+    const option = new Option(text, value);
+    option.selected = (favorite.change_type || "add") === value;
+    changeType.add(option);
+  });
+  changeTypeLabel.appendChild(changeType);
+  form.appendChild(changeTypeLabel);
+
+  const actions = document.createElement("div");
+  actions.className = "favourite-actions";
+  const saveButton = document.createElement("button");
+  saveButton.type = "submit";
+  saveButton.className = "btn-primary";
+  saveButton.textContent = "Save changes";
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "btn-secondary";
+  cancelButton.textContent = "Cancel";
+  cancelButton.addEventListener("click", loadFavourites);
+  actions.append(saveButton, cancelButton);
+  form.appendChild(actions);
+
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const value = name => form.elements.namedItem(name).value.trim();
+    const name = value("name");
+    const itemName = value("item_name");
+    const description = value("description");
+    if (!name || (!itemName && !description)) {
+      alert("Enter a favourite name and an item name or description.");
+      return;
+    }
+
+    const updated = {
+      ...favorite,
+      name,
+      section: value("section"),
+      item_name: itemName,
+      description,
+      unit: value("unit") || "pcs",
+      quantity: Number(value("quantity")) || 0,
+      unit_cost: Number(value("unit_cost")) || 0,
+      unit_price: Number(value("unit_price")) || 0,
+      change_type: form.elements.namedItem("change_type").value
+    };
+    saveFavorites(getFavorites().map(item => item.id === favorite.id ? updated : item));
+  });
+
+  card.append(heading, form);
+}
+
+function saveFavoriteFromRow(type, row) {
+  const value = selector => row.querySelector(selector)?.value?.trim() || "";
+  const item = type === "vo" ? {
+    section: value(".vo-section"),
+    item_name: value(".vo-item-name"),
+    description: value(".vo-desc"),
+    unit: value(".vo-unit") || "pcs",
+    quantity: Number(value(".vo-qty")) || 1,
+    unit_price: Number(value(".vo-price")) || 0,
+    unit_cost: 0,
+    change_type: row.querySelector(".vo-change-type")?.value || "add"
+  } : {
+    section: value(".item-section"),
+    item_name: value(".item-name"),
+    description: value(".item-desc"),
+    unit: value(".item-unit") || "pcs",
+    quantity: Number(value(".item-qty")) || 1,
+    unit_cost: Number(value(".item-cost")) || 0,
+    unit_price: Number(value(".item-price")) || 0,
+    change_type: "add"
+  };
+
+  if (!item.item_name && !item.description) return alert("Enter an item name or description before saving this line.");
+  const suggestedName = item.item_name || item.description.slice(0, 50);
+  const name = prompt("Save this line as a favourite:", suggestedName);
+  if (name === null || !name.trim()) return;
+  const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  saveFavorites([...getFavorites(), { ...item, id, name: name.trim() }]);
+}
+
+function insertSelectedFavorite(type) {
+  const pickerId = type === "vo" ? "vo-favourite-picker" : "quotation-favourite-picker";
+  const favoriteId = document.getElementById(pickerId)?.value;
+  const favorite = getFavorites().find(item => item.id === favoriteId);
+  if (!favorite) return alert("Choose a favourite line first.");
+
+  if (type === "vo") {
+    addVoItemRow({ ...favorite, change_type: favorite.change_type || "add" });
+    updateVoTotal();
+  } else {
+    addItemRow(favorite);
+    updateQuotationTotal();
+  }
 }
 
 function previewImage(input, previewId) {
@@ -473,6 +757,9 @@ document.getElementById("btn-add-item")?.addEventListener("click", () => {
   addItemRow();
 });
 
+document.getElementById("btn-replace-all-quotation-text")?.addEventListener("click", replaceAllQuotationText);
+document.getElementById("btn-insert-quotation-favourite")?.addEventListener("click", () => insertSelectedFavorite("quotation"));
+
 document.getElementById("btn-save-quotation")?.addEventListener("click", async () => {
   await saveQuotation();
   // After loadQuotations and loadVos
@@ -498,8 +785,10 @@ function closeQuotationForm() {
 function addItemRow(item = null) {
   const tbody = document.getElementById("items-body");
   const tr = document.createElement("tr");
+  tr.dataset.isNew = item ? "false" : "true";
 
   tr.innerHTML = `
+    <td class="line-marker-cell"><span class="line-number"></span><span class="line-indicators"></span></td>
     <td>
       <input type="text" class="item-section" value="${item?.section || ""}" placeholder="e.g. Kitchen / Living" />
     </td>
@@ -525,11 +814,17 @@ function addItemRow(item = null) {
       <input type="number" class="item-amount" value="${item?.amount || 0}" readonly />
     </td>
     <td>
+      <button type="button" class="btn-save-favorite" title="Save this line to Favourites" aria-label="Save this line to Favourites">☆</button>
       <button type="button" class="btn-remove-item">×</button>
     </td>
   `;
 
   tbody.appendChild(tr);
+
+  const trackedFields = [...tr.querySelectorAll("input, textarea")].filter(field => !field.classList.contains("item-amount"));
+  tr.dataset.originalValues = JSON.stringify(trackedFields.map(field => field.value));
+  trackedFields.forEach(field => field.addEventListener("input", updateQuotationLineIndicators));
+  updateQuotationLineIndicators();
 
   const qtyInput = tr.querySelector(".item-qty");
   const priceInput = tr.querySelector(".item-price");
@@ -544,11 +839,14 @@ function addItemRow(item = null) {
 
   qtyInput.addEventListener("input", calculate);
   priceInput.addEventListener("input", calculate);
+  calculate();
 
   tr.querySelector(".btn-remove-item").addEventListener("click", () => {
     tr.remove();
     updateQuotationTotal();
+    updateQuotationLineIndicators();
   });
+  tr.querySelector(".btn-save-favorite").addEventListener("click", () => saveFavoriteFromRow("quotation", tr));
 }
 
 function updateQuotationTotal() {
@@ -557,6 +855,75 @@ function updateQuotationTotal() {
     total += parseFloat(input.value) || 0;
   });
   document.getElementById("quotation-total").textContent = "RM " + total.toFixed(2);
+}
+
+function updateQuotationLineIndicators() {
+  const rows = [...document.querySelectorAll("#items-body tr")];
+  const keys = rows.map(row => {
+    const value = selector => (row.querySelector(selector)?.value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return [value(".item-section"), value(".item-name"), value(".item-desc")].join("|#|");
+  });
+  const counts = new Map();
+  keys.forEach((key, index) => {
+    if (key !== "|#| |#|" && (rows[index].querySelector(".item-name").value.trim() || rows[index].querySelector(".item-desc").value.trim())) {
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  });
+
+  rows.forEach((row, index) => {
+    const number = row.querySelector(".line-number");
+    const indicators = row.querySelector(".line-indicators");
+    if (!number || !indicators) return;
+    number.textContent = String(index + 1);
+
+    const trackedFields = [...row.querySelectorAll("input, textarea")].filter(field => !field.classList.contains("item-amount"));
+    const original = JSON.parse(row.dataset.originalValues || "[]");
+    const changed = row.dataset.isNew !== "true" && trackedFields.some((field, fieldIndex) => field.value !== original[fieldIndex]);
+    const duplicate = counts.get(keys[index]) > 1;
+    const badges = [];
+    if (row.dataset.isNew === "true") badges.push('<span class="line-badge line-new" title="New line">NEW</span>');
+    else if (changed) badges.push('<span class="line-badge line-changed" title="Edited since this quotation was opened">EDITED</span>');
+    if (duplicate) badges.push('<span class="line-badge line-duplicate" title="Another line has the same section, item name, and description">⚠ DUPLICATE</span>');
+    indicators.innerHTML = badges.join("");
+    row.classList.toggle("quotation-line-duplicate", duplicate);
+    row.classList.toggle("quotation-line-changed", changed);
+  });
+}
+
+function replaceAllQuotationText() {
+  const findText = document.getElementById("quotation-find-text")?.value || "";
+  const replaceText = document.getElementById("quotation-replace-text")?.value ?? "";
+  const message = document.getElementById("quotation-edit-message");
+  if (!findText) {
+    if (message) message.textContent = "Enter text to find first.";
+    return;
+  }
+
+  const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(escaped, "gi");
+  let fieldsChanged = 0;
+  const linesChanged = new Set();
+  document.querySelectorAll("#items-body tr").forEach(row => {
+    [".item-section", ".item-name", ".item-desc", ".item-unit"].forEach(selector => {
+      const field = row.querySelector(selector);
+      if (!field || !matcher.test(field.value)) {
+        matcher.lastIndex = 0;
+        return;
+      }
+      matcher.lastIndex = 0;
+      field.value = field.value.replace(matcher, replaceText);
+      matcher.lastIndex = 0;
+      fieldsChanged += 1;
+      linesChanged.add(row);
+    });
+  });
+
+  updateQuotationLineIndicators();
+  if (message) {
+    message.textContent = fieldsChanged
+      ? `Replaced text in ${fieldsChanged} field(s) across ${linesChanged.size} line(s). Review the marked lines, then save.`
+      : "No matching text found in the quotation lines.";
+  }
 }
 
 async function saveQuotation() {
@@ -818,7 +1185,7 @@ if (user) {
     html += `
       <div style="margin-bottom:22px;">
         <h3 style="background:#f1f5f9; padding:9px 14px; border-radius:6px; margin:0 0 10px; font-size:1rem;">${section}</h3>
-        <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+        <table class="pdf-items-table" style="width:100%; border-collapse:collapse; font-size:0.86rem;">
           <thead>
             <tr style="background:#f8fafc;">
               <th style="text-align:left; padding:8px; width:17%; border-bottom:1px solid #e2e8f0;">Item Name</th>
@@ -915,7 +1282,7 @@ if (user) {
 
     <!-- ACTION BUTTONS -->
     <div style="display:flex; gap:12px; margin-top:24px; flex-wrap:wrap;">
-      <button onclick="generatePDF()" class="btn-primary" style="width:auto;">Download PDF</button>
+      <button onclick="generatePDF()" class="btn-primary" style="width:auto;">Preview / Save as PDF</button>
       <button onclick="changeQuotationStatus('${quotation.id}', 'adjusting')" class="btn-secondary" style="width:auto; background:#f59e0b; color:white;">Mark as Adjusting</button>
       <button onclick="changeQuotationStatus('${quotation.id}', 'approved')" class="btn-secondary" style="width:auto; background:#10b981; color:white;">Mark as Approved</button>
       <button onclick="closeViewQuotation()" class="btn-secondary" style="width:auto;">Close</button>
@@ -955,11 +1322,20 @@ function closeViewQuotation() {
     </div>
 
     <h4 style="margin: 24px 0 12px;">Line Items</h4>
+
+    <div class="quotation-edit-tools">
+      <label>Find <input type="text" id="quotation-find-text" placeholder="Word or phrase" /></label>
+      <label>Replace with <input type="text" id="quotation-replace-text" placeholder="Replacement text" /></label>
+      <button type="button" id="btn-replace-all-quotation-text" class="btn-secondary" style="width:auto;">Replace in all lines</button>
+      <span id="quotation-edit-message" role="status" aria-live="polite"></span>
+      <span class="line-help">Line markers show new, edited, or duplicate entries.</span>
+    </div>
     
     <div class="table-responsive">
       <table class="items-table" id="items-table">
         <thead>
           <tr>
+            <th style="width:8%">Line</th>
             <th style="width:11%">Section</th>
             <th style="width:16%">Item Name</th>
             <th style="width:33%">Description</th>
@@ -978,6 +1354,11 @@ function closeViewQuotation() {
     </div>
 
     <button type="button" id="btn-add-item" class="btn-secondary" style="width:auto; margin-top:12px;">+ Add Item</button>
+      <div class="favourite-insert-tools">
+        <label for="quotation-favourite-picker">Reusable line</label>
+        <select id="quotation-favourite-picker"><option value="">Choose a favourite line</option></select>
+        <button type="button" id="btn-insert-quotation-favourite" class="btn-secondary" style="width:auto;">Add to quotation</button>
+      </div>
 
     <div class="totals-box">
       <div class="total-row">
@@ -996,22 +1377,85 @@ function closeViewQuotation() {
   document.getElementById("btn-add-item").addEventListener("click", () => addItemRow());
   document.getElementById("btn-save-quotation").addEventListener("click", () => saveQuotation());
   document.getElementById("btn-cancel-quotation").addEventListener("click", () => closeQuotationForm());
+  document.getElementById("btn-replace-all-quotation-text").addEventListener("click", replaceAllQuotationText);
+  document.getElementById("btn-insert-quotation-favourite").addEventListener("click", () => insertSelectedFavorite("quotation"));
+  refreshFavoritePickers();
 }
 
 
 function generatePDF() {
-  const element = document.getElementById("quotation-pdf-content");
-  if (!element) return alert("Nothing to export");
+  const quotation = document.getElementById("quotation-pdf-content");
+  if (!quotation) return alert("Nothing to preview");
 
-  const opt = {
-    margin:       [10, 10, 10, 10],
-    filename:     `Quotation_v${Date.now()}.pdf`,
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  };
+  // Open immediately from the click so the browser does not block the tab.
+  const previewWindow = window.open("", "_blank");
+  if (!previewWindow) {
+    return alert("The preview tab was blocked. Allow pop-ups for this app, then try again.");
+  }
 
-  html2pdf().set(opt).from(element).save();
+  const previewDocument = previewWindow.document;
+  previewDocument.open();
+  previewDocument.write(`<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Quotation Preview</title>
+      <style>
+        @page { size: A4 portrait; margin: 10mm; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; color: #1e293b; font-family: Arial, sans-serif; }
+        body { background: #e2e8f0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .preview-toolbar { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 20px; background: #0f172a; color: white; }
+        .preview-toolbar button { border: 0; border-radius: 7px; padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .preview-toolbar .print-button { background: #2563eb; color: white; }
+        .preview-toolbar .close-button { background: #e2e8f0; color: #1e293b; }
+        #preview-content { width: 190mm; min-height: 277mm; margin: 24px auto; padding: 0; background: white; box-shadow: 0 4px 24px rgba(15,23,42,.18); }
+        #quotation-pdf-content { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+        .pdf-items-table { width: 100% !important; table-layout: fixed; border-collapse: collapse; }
+        .pdf-items-table th, .pdf-items-table td { overflow-wrap: anywhere; word-break: break-word; }
+        .pdf-items-table thead { display: table-header-group; }
+        .pdf-items-table tr, .pdf-items-table img { break-inside: avoid; page-break-inside: avoid; }
+        h3 { break-after: avoid; page-break-after: avoid; }
+        @media screen and (max-width: 760px) { #preview-content { width: calc(100% - 24px); min-height: 0; padding: 16px; } }
+        @media print {
+          html, body { width: auto; background: white; }
+          .preview-toolbar { display: none !important; }
+          #preview-content { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+          #quotation-pdf-content { padding: 0 !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <header class="preview-toolbar">
+        <strong>Quotation preview · A4</strong>
+        <div>
+          <button type="button" class="print-button" id="preview-print">Print / Save as PDF</button>
+          <button type="button" class="close-button" id="preview-close">Close preview</button>
+        </div>
+      </header>
+      <main id="preview-content"></main>
+    </body>
+    </html>`);
+  previewDocument.close();
+  previewWindow.document.title = "Quotation Preview";
+
+  const copy = previewDocument.importNode(quotation, true);
+  copy.querySelectorAll("script").forEach(script => script.remove());
+  copy.querySelectorAll("*").forEach(node => {
+    [...node.attributes].forEach(attribute => {
+      if (attribute.name.toLowerCase().startsWith("on")) node.removeAttribute(attribute.name);
+    });
+  });
+  previewDocument.getElementById("preview-content").appendChild(copy);
+
+  previewDocument.getElementById("preview-print").addEventListener("click", async () => {
+    const images = [...previewDocument.images];
+    await Promise.all(images.map(image => image.decode ? image.decode().catch(() => {}) : Promise.resolve()));
+    previewWindow.focus();
+    previewWindow.print();
+  });
+  previewDocument.getElementById("preview-close").addEventListener("click", () => previewWindow.close());
 }
 
 async function changeQuotationStatus(quotationId, newStatus) {
@@ -1133,6 +1577,8 @@ document.getElementById("btn-add-vo-item")?.addEventListener("click", () => {
   addVoItemRow();
 });
 
+document.getElementById("btn-insert-vo-favourite")?.addEventListener("click", () => insertSelectedFavorite("vo"));
+
 document.getElementById("btn-save-vo")?.addEventListener("click", async () => {
   await saveVo();
   // After loadQuotations and loadVos
@@ -1194,6 +1640,7 @@ function addVoItemRow(item = null) {
       <input type="number" class="vo-amount" value="${item?.amount || 0}" readonly />
     </td>
     <td>
+      <button type="button" class="btn-save-favorite" title="Save this line to Favourites" aria-label="Save this line to Favourites">☆</button>
       <button type="button" class="btn-remove-item">×</button>
     </td>
   `;
@@ -1221,11 +1668,13 @@ function addVoItemRow(item = null) {
   qtyInput.addEventListener("input", calculate);
   priceInput.addEventListener("input", calculate);
   typeSelect.addEventListener("change", calculate);
+  calculate();
 
   tr.querySelector(".btn-remove-item").addEventListener("click", () => {
     tr.remove();
     updateVoTotal();
   });
+  tr.querySelector(".btn-save-favorite").addEventListener("click", () => saveFavoriteFromRow("vo", tr));
 }
 
 function updateVoTotal() {

@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quotation System</title>
   <link rel="stylesheet" href="css/style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -78,15 +77,15 @@
         <div class="cards">
           <div class="card">
             <h3>Total Projects</h3>
-            <p class="number">0</p>
+              <p class="number" id="dashboard-total-projects">—</p>
           </div>
           <div class="card">
             <h3>Pending Quotations</h3>
-            <p class="number">0</p>
+              <p class="number" id="dashboard-pending-quotations">—</p>
           </div>
           <div class="card">
             <h3>Approved this month</h3>
-            <p class="number">0</p>
+              <p class="number" id="dashboard-approved-this-month">—</p>
           </div>
         </div>
       </section>
@@ -245,7 +244,9 @@
 
       <section id="page-favourites" class="page hidden">
         <h2>Favourites Library</h2>
-        <p>Coming next...</p>
+        <p class="page-desc">Save a line from a quotation or variation order with the ☆ button, then reuse it from the editor.</p>
+        <p class="favourites-storage-note">Favourites are saved in this browser for the signed-in account.</p>
+        <div id="favourites-list" class="favourites-list"></div>
       </section>
 
 <!-- ==================== PROJECT DETAIL ==================== -->
@@ -348,6 +349,11 @@
   </div>
 
   <button type="button" id="btn-add-vo-item" class="btn-secondary" style="width:auto; margin-top:12px;">+ Add Item</button>
+  <div class="favourite-insert-tools">
+    <label for="vo-favourite-picker">Reusable line</label>
+    <select id="vo-favourite-picker"><option value="">Choose a favourite line</option></select>
+    <button type="button" id="btn-insert-vo-favourite" class="btn-secondary" style="width:auto;">Add to VO</button>
+  </div>
 
   <div class="totals-box">
     <div class="total-row">
@@ -378,11 +384,20 @@
     </div>
 
     <h4 style="margin: 24px 0 12px;">Line Items</h4>
+
+    <div class="quotation-edit-tools">
+      <label>Find <input type="text" id="quotation-find-text" placeholder="Word or phrase" /></label>
+      <label>Replace with <input type="text" id="quotation-replace-text" placeholder="Replacement text" /></label>
+      <button type="button" id="btn-replace-all-quotation-text" class="btn-secondary" style="width:auto;">Replace in all lines</button>
+      <span id="quotation-edit-message" role="status" aria-live="polite"></span>
+      <span class="line-help">Line markers show new, edited, or duplicate entries.</span>
+    </div>
     
     <div class="table-responsive">
   <table class="items-table" id="items-table">
     <thead>
       <tr>
+        <th style="width:8%">Line</th>
         <th style="width:11%">Section</th>
         <th style="width:16%">Item Name</th>
         <th style="width:33%">Description</th>
@@ -401,6 +416,11 @@
 </div>
 
     <button type="button" id="btn-add-item" class="btn-secondary" style="width:auto; margin-top:12px;">+ Add Item</button>
+    <div class="favourite-insert-tools">
+      <label for="quotation-favourite-picker">Reusable line</label>
+      <select id="quotation-favourite-picker"><option value="">Choose a favourite line</option></select>
+      <button type="button" id="btn-insert-quotation-favourite" class="btn-secondary" style="width:auto;">Add to quotation</button>
+    </div>
 
     <div class="totals-box">
       <div class="total-row">
