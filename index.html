@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quotation System</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+  <!-- ========== LOGIN PAGE ========== -->
+  <div id="auth-page" class="auth-container">
+    <div class="auth-box">
+      <h1>Quotation System</h1>
+      <p class="subtitle">Login or create an account</p>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="login-email" required placeholder="you@company.com" />
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="login-password" required placeholder="••••••••" />
+        </div>
+        <button type="submit">Login</button>
+        <div class="switch">
+          Don't have an account? <a id="show-register">Register</a>
+        </div>
+      </form>
+
+      <form id="register-form" class="hidden">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="register-name" required placeholder="Your name" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="register-email" required placeholder="you@company.com" />
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="register-password" required placeholder="••••••••" minlength="6" />
+        </div>
+        <button type="submit">Create Account</button>
+        <div class="switch">
+          Already have an account? <a id="show-login">Login</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========== MAIN APP (after login) ========== -->
+  <div id="app" class="hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">Quotation System</div>
+      <nav>
+        <a href="#" class="nav-item active" data-page="dashboard">Dashboard</a>
+        <a href="#" class="nav-item" data-page="company">Company Profile</a>
+        <a href="#" class="nav-item" data-page="projects">Projects</a>
+        <a href="#" class="nav-item" data-page="favourites">Favourites</a>
+      </nav>
+      <div class="sidebar-footer">
+        <p id="current-user-email"></p>
+        <button id="logout-btn" class="logout-btn">Logout</button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Dashboard Page -->
+      <section id="page-dashboard" class="page">
+        <h2>Dashboard</h2>
+        <p>Welcome to your Quotation System.</p>
+        <div class="cards">
+          <div class="card">
+            <h3>Total Projects</h3>
+            <p class="number">0</p>
+          </div>
+          <div class="card">
+            <h3>Pending Quotations</h3>
+            <p class="number">0</p>
+          </div>
+          <div class="card">
+            <h3>Approved this month</h3>
+            <p class="number">0</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Company Profile Page -->
+      <section id="page-company" class="page hidden">
+        <h2>Company Profile</h2>
+        <p class="page-desc">This information will appear on every quotation, invoice and checklist.</p>
+
+        <form id="company-form" class="company-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Company Name</label>
+              <input type="text" id="company-name" required />
+            </div>
+            <div class="form-group">
+              <label>SSM / Registration No</label>
+              <input type="text" id="company-ssm" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Address</label>
+            <textarea id="company-address" rows="3"></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="text" id="company-phone" />
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" id="company-email" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Primary Colour (for PDF)</label>
+              <input type="color" id="company-colour" value="#2563eb" />
+            </div>
+            <div class="form-group">
+              <label>Prepared By (default name)</label>
+              <input type="text" id="company-prepared-by" />
+            </div>
+          </div>
+
+
+          <div class="form-row">
+  <div class="form-group">
+    <label>Account Holder</label>
+    <input type="text" id="company-account-holder" placeholder="e.g. Name" />
+  </div>
+  <div class="form-group">
+    <label>Account Handler</label>
+    <input type="text" id="company-account-handler" placeholder="e.g. CIMB" />
+  </div>
+</div>
+
+<div class="form-group">
+  <label>Account Number</label>
+  <input type="text" id="company-account-number" placeholder="e.g. 1234567890" />
+</div>
+
+
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Company Logo</label>
+              <input type="file" id="company-logo" accept="image/*" />
+              <div id="logo-preview" class="preview"></div>
+            </div>
+            <div class="form-group">
+              <label>Company Chop</label>
+              <input type="file" id="company-chop" accept="image/*" />
+              <div id="chop-preview" class="preview"></div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary">Save Company Profile</button>
+        </form>
+      </section>
+
+      <!-- Placeholder pages -->
+      <<section id="page-projects" class="page hidden">
+  <div class="page-header">
+    <div>
+      <h2>Projects</h2>
+      <p class="page-desc">Manage all your projects here</p>
+    </div>
+    <button id="btn-new-project" class="btn-primary" style="width:auto;">+ New Project</button>
+  </div>
+
+  <!-- Create / Edit Project Form -->
+  <div id="project-form-container" class="company-form hidden" style="margin-bottom: 30px;">
+    <h3 id="project-form-title">Create New Project</h3>
+    <form id="project-form">
+      <input type="hidden" id="project-id" />
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Project Name *</label>
+          <input type="text" id="project-name" required placeholder="e.g. Taman ABC Renovation" />
+        </div>
+        <div class="form-group">
+          <label>Client Name *</label>
+          <input type="text" id="client-name" required placeholder="e.g. Mr. Tan" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Client Phone</label>
+          <input type="text" id="client-phone" placeholder="012-3456789" />
+        </div>
+        <div class="form-group">
+          <label>Client Email</label>
+          <input type="email" id="client-email" placeholder="client@email.com" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Client Address</label>
+        <textarea id="client-address" rows="2" placeholder="Site address"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="date" id="start-date" />
+        </div>
+        <div class="form-group">
+          <label>Due Date</label>
+          <input type="date" id="due-date" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="project-notes" rows="2"></textarea>
+      </div>
+
+      <div style="display:flex; gap:12px; margin-top:20px;">
+        <button type="submit" class="btn-primary" style="width:auto;">Save Project</button>
+        <button type="button" id="btn-cancel-project" class="btn-secondary" style="width:auto;">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Projects List -->
+  <div id="projects-list" class="projects-list">
+    <!-- Projects will be loaded here -->
+  </div>
+</section>
+
+      <section id="page-favourites" class="page hidden">
+        <h2>Favourites Library</h2>
+        <p>Coming next...</p>
+      </section>
+
+<!-- ==================== PROJECT DETAIL ==================== -->
+
+<section id="page-project-detail" class="page hidden">
+  <div class="page-header">
+    <div>
+      <button id="btn-back-projects" class="btn-secondary" style="width:auto; margin-bottom:12px;">← Back to Projects</button>
+      <h2 id="detail-project-name">Project Name</h2>
+      <p class="page-desc" id="detail-client-info">Client info</p>
+    </div>
+
+    <div>
+      <button id="btn-new-quotation" class="btn-primary" style="width:auto;">+ New Quotation</button>
+    </div>
+  </div>
+
+  <!-- Running Contract Value -->
+<div id="contract-summary" class="company-form" style="margin-bottom: 28px; padding: 20px 24px;">
+  <h3 style="margin-bottom: 16px;">Contract Summary</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+    <div>
+      <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Original Quotation</p>
+      <div id="summary-original">RM 0.00</div>
+    </div>
+    <div>
+      <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Approved Variation Orders</p>
+      <div id="summary-vo">RM 0.00</div>
+    </div>
+    <div>
+      <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px;">Current Contract Value</p>
+      <p id="summary-total" style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">RM 0.00</p>
+    </div>
+  </div>
+</div>
+
+  <!-- Quotation List -->
+
+  <div id="quotations-list" class="projects-list">
+    <!-- quotations will load here -->
+  </div>
+
+<!-- ==================== VARIATION ORDERS ==================== -->
+<div style="margin-top: 40px;">
+  <div class="page-header">
+    <div>
+      <h3 style="margin-bottom:4px;">Variation Orders (VO)</h3>
+      <p class="page-desc" style="margin:0;">Manage additional works and changes</p>
+    </div>
+    <button id="btn-new-vo" class="btn-primary" style="width:auto;">+ New VO</button>
+  </div>
+
+  <div id="vo-list" class="projects-list" style="margin-top:16px;">
+    <!-- VOs will load here -->
+  </div>
+</div>
+
+<!-- Create / Edit VO Form -->
+<div id="vo-form-container" class="company-form hidden" style="margin-top:30px;">
+  <h3 id="vo-form-title">New Variation Order</h3>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label>VO Title</label>
+      <input type="text" id="vo-title" placeholder="e.g. Additional Kitchen Works" />
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <input type="text" id="vo-notes" placeholder="Optional notes" />
+    </div>
+  </div>
+
+  <h4 style="margin: 24px 0 12px;">VO Items</h4>
+
+  <div class="table-responsive">
+    <table class="items-table" id="vo-items-table">
+  <thead>
+    <tr>
+      <th style="width:9%">Type</th>
+      <th style="width:11%">Section</th>
+      <th style="width:15%">Item Name</th>
+      <th style="width:30%">Description</th>
+      <th style="width:6%">Unit</th>
+      <th style="width:6%">Qty</th>
+      <th style="width:9%">Unit Price</th>
+      <th style="width:8%">Amount</th>
+      <th style="width:2%"></th>
+    </tr>
+  </thead>
+  <tbody id="vo-items-body">
+    <!-- rows -->
+  </tbody>
+</table>
+  </div>
+
+  <button type="button" id="btn-add-vo-item" class="btn-secondary" style="width:auto; margin-top:12px;">+ Add Item</button>
+
+  <div class="totals-box">
+    <div class="total-row">
+      <span>VO Total:</span>
+      <strong id="vo-total">RM 0.00</strong>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:12px; margin-top:24px;">
+    <button type="button" id="btn-save-vo" class="btn-primary" style="width:auto;">Save VO</button>
+    <button type="button" id="btn-cancel-vo" class="btn-secondary" style="width:auto;">Cancel</button>
+  </div>
+</div>
+
+  <!-- Create / Edit Quotation Form -->
+  <div id="quotation-form-container" class="company-form hidden" style="margin-top:30px;">
+    <h3 id="quotation-form-title">New Quotation</h3>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label>Prepared By</label>
+        <input type="text" id="quotation-prepared-by" />
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <input type="text" id="quotation-notes" placeholder="Optional notes" />
+      </div>
+    </div>
+
+    <h4 style="margin: 24px 0 12px;">Line Items</h4>
+    
+    <div class="table-responsive">
+  <table class="items-table" id="items-table">
+    <thead>
+      <tr>
+        <th style="width:11%">Section</th>
+        <th style="width:16%">Item Name</th>
+        <th style="width:33%">Description</th>
+        <th style="width:6%">Unit</th>
+        <th style="width:6%">Qty</th>
+        <th style="width:9%">Unit Cost</th>
+        <th style="width:9%">Unit Price</th>
+        <th style="width:8%">Amount</th>
+        <th style="width:2%"></th>
+      </tr>
+    </thead>
+    <tbody id="items-body">
+      <!-- rows will be added here -->
+    </tbody>
+  </table>
+</div>
+
+    <button type="button" id="btn-add-item" class="btn-secondary" style="width:auto; margin-top:12px;">+ Add Item</button>
+
+    <div class="totals-box">
+      <div class="total-row">
+        <span>Total Amount:</span>
+        <strong id="quotation-total">RM 0.00</strong>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; margin-top:24px;">
+      <button type="button" id="btn-save-quotation" class="btn-primary" style="width:auto;">Save Quotation</button>
+      <button type="button" id="btn-cancel-quotation" class="btn-secondary" style="width:auto;">Cancel</button>
+    </div>
+  </div>
+</section>
+
+    </main>
+  </div>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

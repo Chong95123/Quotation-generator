@@ -1,0 +1,454 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: #f1f5f9;
+  color: #1e293b;
+  min-height: 100vh;
+}
+
+/* ========== AUTH PAGE ========== */
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+}
+
+.auth-box {
+  width: 100%;
+  max-width: 420px;
+  background: white;
+  padding: 40px 32px;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+}
+
+.auth-box h1 {
+  text-align: center;
+  font-size: 1.8rem;
+  margin-bottom: 6px;
+}
+
+.subtitle {
+  text-align: center;
+  color: #64748b;
+  margin-bottom: 28px;
+  font-size: 0.95rem;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  transition: border 0.2s;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+}
+
+button, .btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover, .btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.switch {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.switch a {
+  color: #2563eb;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ========== APP LAYOUT ========== */
+#app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 260px;
+  background: #0f172a;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+}
+
+.logo {
+  font-size: 1.3rem;
+  font-weight: 700;
+  padding: 0 24px 28px;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 20px;
+}
+
+.sidebar nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px;
+}
+
+.nav-item {
+  color: #94a3b8;
+  text-decoration: none;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.nav-item:hover {
+  background: #1e293b;
+  color: white;
+}
+
+.nav-item.active {
+  background: #2563eb;
+  color: white;
+}
+
+.sidebar-footer {
+  padding: 20px 24px 0;
+  border-top: 1px solid #1e293b;
+  margin-top: 20px;
+}
+
+.sidebar-footer p {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.logout-btn {
+  background: #ef4444;
+  padding: 10px;
+  font-size: 0.9rem;
+}
+
+.logout-btn:hover {
+  background: #dc2626;
+}
+
+/* ========== MAIN CONTENT ========== */
+.main-content {
+  flex: 1;
+  padding: 32px 40px;
+  overflow-y: auto;
+}
+
+.page h2 {
+  font-size: 1.7rem;
+  margin-bottom: 8px;
+}
+
+.page-desc {
+  color: #64748b;
+  margin-bottom: 28px;
+}
+
+/* Dashboard cards */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.card {
+  background: white;
+  padding: 24px;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.card h3 {
+  font-size: 0.95rem;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+
+.card .number {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* Company Form */
+.company-form {
+  background: white;
+  padding: 28px;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  max-width: 800px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.company-form textarea {
+  resize: vertical;
+}
+
+.company-form input[type="color"] {
+  height: 42px;
+  padding: 4px;
+}
+
+.preview {
+  margin-top: 10px;
+}
+
+.preview img {
+  max-width: 120px;
+  max-height: 80px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.btn-primary {
+  margin-top: 20px;
+  width: auto;
+  padding: 12px 28px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  #app {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ===== Projects Page ===== */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.btn-secondary {
+  background: #e2e8f0;
+  color: #334155;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #cbd5e1;
+}
+
+.projects-list {
+  display: grid;
+  gap: 16px;
+}
+
+.project-card {
+  background: white;
+  border-radius: 14px;
+  padding: 20px 24px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: transform 0.15s;
+}
+
+.project-card:hover {
+  transform: translateY(-2px);
+}
+
+.project-info h3 {
+  font-size: 1.15rem;
+  margin-bottom: 4px;
+}
+
+.project-info p {
+  color: #64748b;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+}
+
+.project-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.status-draft { background: #f1f5f9; color: #475569; }
+.status-adjusting { background: #fef3c7; color: #92400e; }
+.status-approved { background: #dcfce7; color: #166534; }
+.status-completed { background: #e0e7ff; color: #3730a3; }
+
+.project-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.project-actions button {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}
+
+.btn-edit {
+  background: #3b82f6;
+}
+
+.btn-delete {
+  background: #ef4444;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #94a3b8;
+  background: white;
+  border-radius: 14px;
+}
+
+
+/* ===== Improved Quotation Table ===== */
+.table-responsive {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.items-table {
+  width: 100%;
+  min-width: 1100px;          /* force wider table */
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.9rem;
+}
+
+.items-table th {
+  background: #f1f5f9;
+  padding: 12px 8px;
+  text-align: left;
+  font-size: 0.82rem;
+  color: #475569;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.items-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.items-table input,
+.items-table textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  background: #fff;
+  font-family: inherit;
+}
+
+.items-table textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.items-table input:focus,
+.items-table textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.btn-remove-item {
+  background: #ef4444;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Make the quotation form wider */
+#quotation-form-container {
+  max-width: 100% !important;
+}
+
+
+/* Make VO form full width like Quotation */
+#vo-form-container {
+  max-width: 100% !important;
+}
+
+#vo-form-container .items-table {
+  min-width: 1100px;
+}
