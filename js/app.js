@@ -1,4 +1,9 @@
 let activeUserId = null;
+let dashboardProjects = [];
+let dashboardSelectedProjectId = null;
+let dashboardProfitSummaries = new Map();
+let dashboardLoadToken = 0;
+const PROJECT_HEALTH_THRESHOLDS = { healthyMargin: 20, dangerMargin: 10 };
 const FAVORITES_STORAGE_PREFIX = "quotation-system-favorites:";
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -81,6 +86,52 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
+  document.getElementById("dashboard-project-profit-details")?.addEventListener("submit", async event => {
+    if (!event.target.matches(".dashboard-cost-form")) return;
+    event.preventDefault();
+    const form = event.target;
+    const projectId = form.dataset.projectId;
+    const description = form.elements.namedItem("description").value.trim();
+    const amount = Number(form.elements.namedItem("amount").value);
+    const costType = form.elements.namedItem("cost_type").value;
+    if (!description || !Number.isFinite(amount) || amount <= 0) {
+      alert("Enter a cost description and an amount greater than zero.");
+      return;
+    }
+    const { error } = await supabaseClient.from("project_costs").insert([{
+      project_id: projectId,
+      user_id: activeUserId,
+      description,
+      amount,
+      cost_type: costType
+    }]);
+    if (error) return alert("Could not save project cost. Check the Supabase setup SQL: " + error.message);
+    await showDashboardProjectProfit(projectId, true);
+  });
+
+  document.getElementById("dashboard-project-profit-details")?.addEventListener("click", async event => {
+    const button = event.target.closest("[data-delete-project-cost]");
+    if (!button) return;
+    if (!confirm("Delete this project cost?")) return;
+    const { error } = await supabaseClient.from("project_costs")
+      .delete()
+      .eq("id", button.dataset.deleteProjectCost)
+      .eq("user_id", activeUserId);
+    if (error) return alert("Could not delete project cost: " + error.message);
+    await showDashboardProjectProfit(dashboardSelectedProjectId, true);
+  });
+
+  document.getElementById("dashboard-project-list")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-view-project-profit]");
+    if (button) showDashboardProjectProfit(button.dataset.viewProjectProfit);
+  });
+
+  document.getElementById("dashboard-back-project-list")?.addEventListener("click", () => {
+    dashboardSelectedProjectId = null;
+    document.getElementById("dashboard-project-profit-panel").classList.add("hidden");
+    document.getElementById("dashboard-project-list").classList.remove("hidden");
+  });
+
   // ===== Company form =====
   document.getElementById("company-logo")?.addEventListener("change", function () {
     previewImage(this, "logo-preview");
@@ -119,6 +170,7 @@ function showApp(user) {
 
 async function loadDashboardStats() {
   if (!activeUserId) return;
+  const loadToken = ++dashboardLoadToken;
 
   const projectCountEl = document.getElementById("dashboard-total-projects");
   const pendingCountEl = document.getElementById("dashboard-pending-quotations");
@@ -130,11 +182,16 @@ async function loadDashboardStats() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-  const [projectsResult, pendingResult, approvedResult] = await Promise.all([
+  const [projectsResult, projectListResult, pendingResult, approvedResult] = await Promise.all([
     supabaseClient
       .from("projects")
       .select("id", { count: "exact", head: true })
       .eq("user_id", activeUserId),
+    supabaseClient
+      .from("projects")
+    .select("id, project_name, status")
+      .eq("user_id", activeUserId)
+      .order("project_name"),
     supabaseClient
       .from("quotations")
       .select("id", { count: "exact", head: true })
@@ -148,6 +205,7 @@ async function loadDashboardStats() {
       .gte("approved_at", monthStart)
       .lt("approved_at", nextMonthStart)
   ]);
+  if (loadToken !== dashboardLoadToken) return;
 
   [
     [projectsResult, projectCountEl, "projects"],
@@ -161,6 +219,231 @@ async function loadDashboardStats() {
       element.textContent = String(result.count || 0);
     }
   });
+
+  const projectList = document.getElementById("dashboard-project-list");
+  if (!projectList) return;
+  if (projectListResult.error) {
+    console.error("Failed to load projects for dashboard profitability:", projectListResult.error);
+    projectList.innerHTML = "<p>Could not load projects.</p>";
+    return;
+  }
+  dashboardProjects = projectListResult.data || [];
+  dashboardProfitSummaries = new Map();
+  if (!dashboardProjects.length) {
+    dashboardSelectedProjectId = null;
+    document.getElementById("dashboard-project-profit-panel").classList.add("hidden");
+    projectList.classList.remove("hidden");
+    projectList.innerHTML = "<p>Create a project first to see it here.</p>";
+    return;
+  }
+
+  projectList.innerHTML = `
+    <table class="dashboard-project-table">
+      <thead><tr><th>Project</th><th>Current Status</th><th>Health / Net Margin</th><th></th></tr></thead>
+      <tbody>${dashboardProjects.map(project => `
+        <tr>
+          <td>${dashboardEscape(project.project_name)}</td>
+          <td><span class="dashboard-project-status">${dashboardEscape(project.status || "Not set")}</span></td>
+          <td id="dashboard-health-${dashboardEscape(project.id)}"><span class="dashboard-health-badge dashboard-health-loading">Checking…</span></td>
+          <td><button type="button" class="btn-primary dashboard-view-profit" data-view-project-profit="${dashboardEscape(project.id)}">View profit</button></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+  const summaries = await Promise.all(dashboardProjects.map(loadProjectProfitability));
+  if (loadToken !== dashboardLoadToken) return;
+  dashboardProfitSummaries = new Map(summaries.map(summary => [summary.project.id, summary]));
+  summaries.forEach(summary => {
+    const cell = document.getElementById(`dashboard-health-${summary.project.id}`);
+    if (cell) cell.innerHTML = renderProjectHealthCell(summary);
+  });
+
+  const selectedStillExists = dashboardProjects.some(project => project.id === dashboardSelectedProjectId);
+  if (dashboardSelectedProjectId && selectedStillExists) {
+    await showDashboardProjectProfit(dashboardSelectedProjectId);
+  } else {
+    dashboardSelectedProjectId = null;
+    document.getElementById("dashboard-project-profit-panel").classList.add("hidden");
+    projectList.classList.remove("hidden");
+  }
+}
+
+async function showDashboardProjectProfit(projectId, refresh = false) {
+  const project = dashboardProjects.find(item => item.id === projectId);
+  if (!project) return;
+  dashboardSelectedProjectId = projectId;
+  document.getElementById("dashboard-project-list").classList.add("hidden");
+  const panel = document.getElementById("dashboard-project-profit-panel");
+  panel.classList.remove("hidden");
+  document.getElementById("dashboard-selected-project-name").textContent = project.project_name || "Project";
+  document.getElementById("dashboard-selected-project-status").textContent = `Current status: ${project.status || "Not set"}`;
+  const details = document.getElementById("dashboard-project-profit-details");
+  details.innerHTML = "<p>Loading profit estimate…</p>";
+  const summary = refresh || !dashboardProfitSummaries.has(projectId)
+    ? await loadProjectProfitability(project)
+    : dashboardProfitSummaries.get(projectId);
+  dashboardProfitSummaries.set(projectId, summary);
+  const healthCell = document.getElementById(`dashboard-health-${projectId}`);
+  if (healthCell) healthCell.innerHTML = renderProjectHealthCell(summary);
+  if (dashboardSelectedProjectId === projectId) details.innerHTML = renderProjectProfitability(summary);
+}
+
+async function loadProjectProfitability(project) {
+  const [quotationResult, voResult, costsResult] = await Promise.all([
+    supabaseClient.from("quotations").select("id, total_amount, version_no")
+      .eq("project_id", project.id).eq("status", "approved")
+      .order("version_no", { ascending: false }).limit(1).maybeSingle(),
+    supabaseClient.from("variation_orders").select("id, total_amount")
+      .eq("project_id", project.id).eq("status", "approved"),
+    supabaseClient.from("project_costs").select("id, description, amount, cost_type")
+      .eq("project_id", project.id).eq("user_id", activeUserId).order("created_at")
+  ]);
+
+  const summary = {
+    project,
+    revenue: 0,
+    directCosts: 0,
+    overheadCosts: 0,
+    unpricedItems: 0,
+    costs: costsResult.data || [],
+    setupError: quotationResult.error || voResult.error || costsResult.error || null
+  };
+  if (summary.setupError) {
+    console.error(`Could not calculate profitability for ${project.project_name}:`, summary.setupError);
+    return summary;
+  }
+
+  const quotation = quotationResult.data;
+  const vos = voResult.data || [];
+  summary.revenue = (Number(quotation?.total_amount) || 0)
+    + vos.reduce((sum, vo) => sum + (Number(vo.total_amount) || 0), 0);
+
+  const itemQueries = [];
+  if (quotation?.id) {
+    itemQueries.push(supabaseClient.from("quotation_items").select("unit_cost, quantity")
+      .eq("quotation_id", quotation.id));
+  }
+  if (vos.length) {
+    itemQueries.push(supabaseClient.from("vo_items").select("unit_cost, quantity, change_type")
+      .in("vo_id", vos.map(vo => vo.id)));
+  }
+  const itemResults = await Promise.all(itemQueries);
+  const itemError = itemResults.find(result => result.error)?.error;
+  if (itemError) {
+    console.error(`Could not load item costs for ${project.project_name}:`, itemError);
+    summary.setupError = itemError;
+    return summary;
+  }
+  const quotationItemsResult = quotation?.id ? itemResults[0] : null;
+  const voItemsResult = itemResults[quotation?.id ? 1 : 0];
+  (quotationItemsResult?.data || []).forEach(item => {
+    const unitCost = Number(item.unit_cost) || 0;
+    if (unitCost === 0) summary.unpricedItems++;
+    summary.directCosts += unitCost * (Number(item.quantity) || 0);
+  });
+  (voItemsResult?.data || []).forEach(item => {
+    const unitCost = Number(item.unit_cost) || 0;
+    if (unitCost === 0) summary.unpricedItems++;
+    const cost = unitCost * (Number(item.quantity) || 0);
+    summary.directCosts += item.change_type === "omit" ? -Math.abs(cost) : cost;
+  });
+
+  summary.costs.forEach(cost => {
+    const amount = Number(cost.amount) || 0;
+    if (cost.cost_type === "direct") summary.directCosts += amount;
+    else summary.overheadCosts += amount;
+  });
+  return summary;
+}
+
+function dashboardMoney(value) {
+  return `RM ${Number(value || 0).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function dashboardEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[character]);
+}
+
+function getProjectHealth(summary) {
+  if (summary.setupError) {
+    return { level: "orange", label: "Needs data", margin: null,
+      advice: "Profit could not be calculated. Check the Supabase setup and reload the Dashboard." };
+  }
+  if (summary.revenue <= 0) {
+    return { level: "orange", label: "No approved value", margin: null,
+      advice: "Approve a quotation to calculate a useful profit margin." };
+  }
+
+  const netProfit = summary.revenue - summary.directCosts - summary.overheadCosts;
+  const margin = (netProfit / summary.revenue) * 100;
+  if (margin < PROJECT_HEALTH_THRESHOLDS.dangerMargin) {
+    return { level: "red", label: margin < 0 ? "Loss risk" : "Danger", margin,
+      advice: "Review unit costs and expenses. Check whether requested extra work needs a VO, or revise a quotation that is still awaiting approval." };
+  }
+  if (summary.unpricedItems > 0) {
+    return { level: "orange", label: "Cost data incomplete", margin,
+      advice: "Enter unit costs for the flagged lines before relying on this margin. Recheck added costs and any scope changes." };
+  }
+  if (margin < PROJECT_HEALTH_THRESHOLDS.healthyMargin) {
+    return { level: "orange", label: "Watch", margin,
+      advice: "Margin is in the watch range. Recheck item costs and scope changes; price extra approved work in a VO." };
+  }
+  return { level: "green", label: "Healthy", margin,
+    advice: "Margin is above the guide. Keep item costs and extra project expenses up to date." };
+}
+
+function renderProjectHealthCell(summary) {
+  const health = getProjectHealth(summary);
+  const marginText = health.margin === null ? "Margin —" : `${health.margin.toFixed(1)}% net`;
+  return `<span class="dashboard-health-badge dashboard-health-${health.level}">${dashboardEscape(health.label)}</span>
+    <small class="dashboard-health-margin">${marginText}</small>`;
+}
+
+function renderProjectProfitability(summary) {
+  const projectName = dashboardEscape(summary.project.project_name);
+  if (summary.setupError) {
+    const health = getProjectHealth(summary);
+    return `<div class="dashboard-health-panel dashboard-health-orange"><strong>${dashboardEscape(health.label)}</strong><p>${dashboardEscape(health.advice)}</p><p>Profit data is unavailable for ${projectName}. Apply the Supabase setup SQL if it has not been run.</p></div>`;
+  }
+  const grossProfit = summary.revenue - summary.directCosts;
+  const netProfit = grossProfit - summary.overheadCosts;
+  const grossMargin = summary.revenue > 0 ? (grossProfit / summary.revenue) * 100 : null;
+  const netMargin = summary.revenue > 0 ? (netProfit / summary.revenue) * 100 : null;
+  const health = getProjectHealth(summary);
+  const costsMarkup = summary.costs.length
+    ? `<ul class="dashboard-cost-list">${summary.costs.map(cost => `
+        <li>${dashboardEscape(cost.description)} (${cost.cost_type === "direct" ? "direct" : "overhead"}) — ${dashboardMoney(cost.amount)}
+          <button type="button" class="dashboard-cost-delete" data-delete-project-cost="${dashboardEscape(cost.id)}" aria-label="Delete ${dashboardEscape(cost.description)}">Delete</button>
+        </li>`).join("")}</ul>`
+    : `<span class="dashboard-no-costs">None added</span>`;
+  const costWarning = summary.unpricedItems
+    ? `<small class="dashboard-unpriced-warning">${summary.unpricedItems} line(s) have RM 0.00 unit cost</small>`
+    : "";
+  return `<div class="dashboard-project-profit-content">
+    <div class="dashboard-health-panel dashboard-health-${health.level}">
+      <strong><span class="dashboard-health-badge dashboard-health-${health.level}">${dashboardEscape(health.label)}</span>
+      ${health.margin === null ? "" : ` · ${health.margin.toFixed(1)}% net margin`}</strong>
+      <p>${dashboardEscape(health.advice)}</p>
+    </div>
+    <div class="dashboard-profit-metrics">
+      <div><span>Approved Contract Value</span><strong>${dashboardMoney(summary.revenue)}</strong></div>
+      <div><span>Estimated Direct Costs</span><strong>${dashboardMoney(summary.directCosts)}</strong></div>
+      <div><span>Gross Profit</span><strong>${dashboardMoney(grossProfit)}</strong><small>${grossMargin === null ? "Margin —" : `Margin ${grossMargin.toFixed(1)}%`}</small></div>
+      <div><span>Overheads</span><strong>${dashboardMoney(summary.overheadCosts)}</strong></div>
+      <div><span>Estimated Net Profit</span><strong>${dashboardMoney(netProfit)}</strong><small>${netMargin === null ? "Margin —" : `Margin ${netMargin.toFixed(1)}%`}</small></div>
+    </div>
+    ${costWarning}
+    <div class="dashboard-cost-manager"><h5>Additional Project Costs</h5>${costsMarkup}
+      <form class="dashboard-cost-form" data-project-id="${dashboardEscape(summary.project.id)}">
+        <input name="description" placeholder="Cost description" aria-label="Cost description" required>
+        <input name="amount" type="number" min="0.01" step="0.01" placeholder="RM amount" aria-label="Cost amount" required>
+        <select name="cost_type" aria-label="Cost type"><option value="direct">Direct cost</option><option value="overhead">Overhead</option></select>
+        <button type="submit">Add cost</button>
+      </form>
+    </div>
+  </div>`;
 }
 
 function showAuth() {
@@ -358,7 +641,7 @@ function saveFavoriteFromRow(type, row) {
     unit: value(".vo-unit") || "pcs",
     quantity: Number(value(".vo-qty")) || 1,
     unit_price: Number(value(".vo-price")) || 0,
-    unit_cost: 0,
+    unit_cost: Number(value(".vo-cost")) || 0,
     change_type: row.querySelector(".vo-change-type")?.value || "add"
   } : {
     section: value(".item-section"),
@@ -1634,6 +1917,9 @@ function addVoItemRow(item = null) {
       <input type="number" class="vo-qty" value="${item?.quantity || 1}" step="0.01" min="0" />
     </td>
     <td>
+      <input type="number" class="vo-cost" value="${item?.unit_cost || 0}" step="0.01" min="0" />
+    </td>
+    <td>
       <input type="number" class="vo-price" value="${item?.unit_price || 0}" step="0.01" min="0" />
     </td>
     <td>
@@ -1712,6 +1998,7 @@ async function saveVo() {
     if (!itemName && !desc) return;
 
     const quantity = parseFloat(tr.querySelector(".vo-qty").value) || 0;
+    const unitCost = parseFloat(tr.querySelector(".vo-cost").value) || 0;
     const unitPrice = parseFloat(tr.querySelector(".vo-price").value) || 0;
     const changeType = tr.querySelector(".vo-change-type").value;
     let amount = quantity * unitPrice;
@@ -1723,6 +2010,7 @@ async function saveVo() {
       description: desc,
       unit: tr.querySelector(".vo-unit").value.trim() || "pcs",
       quantity,
+      unit_cost: unitCost,
       unit_price: unitPrice,
       amount,
       section: tr.querySelector(".vo-section").value.trim() || "General",

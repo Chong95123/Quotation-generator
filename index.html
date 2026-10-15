@@ -88,6 +88,21 @@
               <p class="number" id="dashboard-approved-this-month">—</p>
           </div>
         </div>
+        <section class="dashboard-profit-section" aria-labelledby="dashboard-profit-heading">
+          <h3 id="dashboard-profit-heading">Current Projects</h3>
+          <p class="page-desc">Choose a project to see only its profit details.</p>
+          <p class="dashboard-health-guide">Suggested net-margin guide, not a universal rule: green ≥20%, orange 10% to under 20%, red under 10%. Incomplete cost data is flagged for review.</p>
+          <div id="dashboard-project-list" class="dashboard-project-list">
+            <p>Loading projects…</p>
+          </div>
+          <div id="dashboard-project-profit-panel" class="dashboard-project-profit-panel hidden">
+            <button type="button" id="dashboard-back-project-list" class="btn-secondary" style="width:auto; margin-bottom:12px;">← All projects</button>
+            <h4 id="dashboard-selected-project-name"></h4>
+            <p id="dashboard-selected-project-status" class="page-desc"></p>
+            <p class="dashboard-profit-note">Estimates use the latest approved quotation and approved VOs. Gross profit = contract value − direct costs. Net profit = gross profit − overheads. Enter unit costs and other project costs for a closer estimate.</p>
+            <div id="dashboard-project-profit-details"></div>
+          </div>
+        </section>
       </section>
 
       <!-- Company Profile Page -->
@@ -337,6 +352,7 @@
       <th style="width:30%">Description</th>
       <th style="width:6%">Unit</th>
       <th style="width:6%">Qty</th>
+      <th style="width:9%">Unit Cost</th>
       <th style="width:9%">Unit Price</th>
       <th style="width:8%">Amount</th>
       <th style="width:2%"></th>
