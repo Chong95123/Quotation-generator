@@ -1566,6 +1566,7 @@ if (user) {
     <!-- ACTION BUTTONS -->
     <div style="display:flex; gap:12px; margin-top:24px; flex-wrap:wrap;">
       <button onclick="generatePDF()" class="btn-primary" style="width:auto;">Preview / Save as PDF</button>
+      ${quotation.status === "approved" ? `<button onclick="generateSiteChecklist('${quotation.id}')" class="btn-secondary" style="width:auto;">Open Site Checklist</button>` : ""}
       <button onclick="changeQuotationStatus('${quotation.id}', 'adjusting')" class="btn-secondary" style="width:auto; background:#f59e0b; color:white;">Mark as Adjusting</button>
       <button onclick="changeQuotationStatus('${quotation.id}', 'approved')" class="btn-secondary" style="width:auto; background:#10b981; color:white;">Mark as Approved</button>
       <button onclick="closeViewQuotation()" class="btn-secondary" style="width:auto;">Close</button>
@@ -1739,6 +1740,129 @@ function generatePDF() {
     previewWindow.print();
   });
   previewDocument.getElementById("preview-close").addEventListener("click", () => previewWindow.close());
+}
+
+async function generateSiteChecklist(quotationId) {
+  // Open synchronously from the button click so the browser allows this tab.
+  const previewWindow = window.open("", "_blank");
+  if (!previewWindow) {
+    return alert("The checklist tab was blocked. Allow pop-ups for this app, then try again.");
+  }
+  previewWindow.document.write("<!doctype html><title>Site Checklist</title><p style='font:16px Arial;padding:24px'>Preparing site checklist…</p>");
+
+  const { data: quotation, error: quotationError } = await supabaseClient
+    .from("quotations")
+    .select("id, project_id, quotation_no, version_no, status, approved_at, updated_at, created_at")
+    .eq("id", quotationId)
+    .single();
+  if (quotationError || !quotation) {
+    previewWindow.close();
+    return alert("Could not load the quotation for the checklist.");
+  }
+  if (quotation.status !== "approved") {
+    previewWindow.close();
+    return alert("A site checklist is available only after the quotation is approved.");
+  }
+
+  const [itemsResult, projectResult] = await Promise.all([
+    supabaseClient.from("quotation_items")
+      .select("item_name, description, quantity, sort_order")
+      .eq("quotation_id", quotationId)
+      .order("sort_order"),
+    supabaseClient.from("projects")
+      .select("project_name, client_name")
+      .eq("id", quotation.project_id)
+      .single()
+  ]);
+  if (itemsResult.error || projectResult.error) {
+    previewWindow.close();
+    return alert("Could not load quotation items or project information for the checklist.");
+  }
+
+  const project = projectResult.data || {};
+  const items = itemsResult.data || [];
+  const rows = items.length ? items.map((item, index) => `
+    <tr>
+      <td>${index + 1}. ${dashboardEscape(item.item_name || "-")}</td>
+      <td class="description">${dashboardEscape(item.description || "-").replace(/\n/g, "<br>")}</td>
+      <td class="qty">${dashboardEscape(item.quantity ?? "")}</td>
+      <td class="recommendation"><span></span></td>
+      <td class="tick"><span class="empty-checkbox" aria-label="Not checked"></span></td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty-row">No quotation items were found.</td></tr>`;
+  const quoteLabel = `${quotation.quotation_no || "Quotation"}-v${quotation.version_no || 1}`;
+  const approvedOn = new Date(quotation.approved_at || quotation.updated_at || quotation.created_at).toLocaleDateString();
+
+  previewWindow.document.open();
+  previewWindow.document.write(`<!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Site Checklist ${dashboardEscape(quoteLabel)}</title>
+      <style>
+        @page { size: A4 portrait; margin: 10mm; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: #1e293b; font-family: Arial, sans-serif; }
+        .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 18px; background:#0f172a; color:#fff; }
+        .toolbar button { width:auto; border:0; border-radius:6px; padding:9px 14px; font-weight:700; cursor:pointer; }
+        .print-button { background:#2563eb; color:#fff; }
+        .close-button { background:#e2e8f0; color:#1e293b; }
+        main { max-width:190mm; margin:22px auto; padding:0 4mm; }
+        h1 { margin:0 0 6px; font-size:22px; }
+        .meta { display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; margin:14px 0 18px; font-size:13px; }
+        .write-line { display:inline-block; min-width:70mm; height:17px; border-bottom:1px solid #94a3b8; }
+        table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }
+        thead { display:table-header-group; }
+        th, td { border:1px solid #94a3b8; padding:7px 6px; vertical-align:top; overflow-wrap:anywhere; }
+        th { background:#f1f5f9; text-align:left; }
+        tr { page-break-inside:avoid; break-inside:avoid; }
+        th:nth-child(1) { width:20%; }
+        th:nth-child(2) { width:34%; }
+        th:nth-child(3) { width:9%; text-align:center; }
+        th:nth-child(4) { width:27%; }
+        th:nth-child(5) { width:10%; text-align:center; }
+        td.qty, td.tick { text-align:center; }
+        td.recommendation { height:38px; }
+        td.recommendation span { display:block; height:22px; border-bottom:1px solid #cbd5e1; }
+        .empty-checkbox { display:inline-block; width:16px; height:16px; border:1.5px solid #334155; }
+        .empty-row { height:40px; text-align:center; }
+        .footer { margin-top:22px; font-size:12px; }
+        @media print {
+          .toolbar { display:none !important; }
+          main { max-width:none; margin:0; padding:0; }
+        }
+      </style>
+    </head>
+    <body>
+      <header class="toolbar"><strong>Site Checklist · A4</strong><div>
+        <button class="print-button" id="checklist-print" type="button">Print / Save as PDF</button>
+        <button class="close-button" id="checklist-close" type="button">Close</button>
+      </div></header>
+      <main>
+        <h1>Site Checklist</h1>
+        <div class="meta">
+          <div><strong>Project:</strong> ${dashboardEscape(project.project_name || "-")}</div>
+          <div><strong>Client:</strong> ${dashboardEscape(project.client_name || "-")}</div>
+          <div><strong>Quotation:</strong> ${dashboardEscape(quoteLabel)}</div>
+          <div><strong>Approved:</strong> ${dashboardEscape(approvedOn)}</div>
+          <div><strong>Site Manager:</strong> <span class="write-line"></span></div>
+          <div><strong>Inspection Date:</strong> <span class="write-line"></span></div>
+        </div>
+        <table>
+          <thead><tr><th>Item</th><th>Description</th><th>Qty</th><th>Recommendation</th><th>Tick</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="footer"><strong>Notes / Follow-up:</strong><br><br><br></div>
+      </main>
+    </body>
+    </html>`);
+  previewWindow.document.close();
+  previewWindow.document.title = `Site Checklist ${quoteLabel}`;
+  previewWindow.document.getElementById("checklist-print").addEventListener("click", () => {
+    previewWindow.focus();
+    previewWindow.print();
+  });
+  previewWindow.document.getElementById("checklist-close").addEventListener("click", () => previewWindow.close());
 }
 
 async function changeQuotationStatus(quotationId, newStatus) {
