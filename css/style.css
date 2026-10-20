@@ -557,6 +557,42 @@ button:hover, .btn-primary:hover {
   margin: 0;
 }
 
+.quotation-template-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 20px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 9px;
+  background: #f8fbff;
+  color: #475569;
+  font-size: .88rem;
+}
+
+.quotation-template-tools select {
+  min-width: 220px;
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+}
+
+.quotation-template-tools button { width: auto; margin: 0; padding: 8px 11px; font-size: .88rem; }
+.favourites-section-title { margin: 24px 0 10px; }
+.template-type-badge { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #e0e7ff; color: #3730a3 !important; font-size: .78rem; }
+.quotation-template-edit-form { display: grid; gap: 12px; }
+.quotation-template-edit-form > label { display: grid; gap: 5px; font-weight: 600; }
+.quotation-template-edit-form > label input { width: 100%; padding: 9px; border: 1px solid #cbd5e1; border-radius: 7px; }
+.template-edit-table { min-width: 980px; width: 100%; border-collapse: collapse; }
+.template-edit-table th, .template-edit-table td { padding: 6px; border: 1px solid #e2e8f0; vertical-align: top; }
+.template-edit-table input, .template-edit-table textarea { width: 100%; min-width: 82px; padding: 7px; border: 1px solid #cbd5e1; border-radius: 5px; font: inherit; }
+.template-edit-table textarea { min-width: 200px; min-height: 62px; resize: vertical; }
+.template-edit-table button { width: auto; padding: 6px 9px; }
+.template-edit-actions { flex-wrap: wrap; }
+
 .btn-save-favorite {
   width: 30px;
   height: 32px;

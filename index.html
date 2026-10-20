@@ -261,6 +261,11 @@
         <h2>Favourites Library</h2>
         <p class="page-desc">Save a line from a quotation or variation order with the ☆ button, then reuse it from the editor.</p>
         <p class="favourites-storage-note">Favourites are saved in this browser for the signed-in account.</p>
+        <h3 class="favourites-section-title">Saved Room Models &amp; Quotation Packages</h3>
+        <p class="page-desc">Room models and packages sync to your account. Edit a saved model here, then import it into a quotation.</p>
+        <div id="quotation-templates-message" class="favourites-storage-note"></div>
+        <div id="quotation-templates-list" class="favourites-list"></div>
+        <h3 class="favourites-section-title">Individual Line Favourites</h3>
         <div id="favourites-list" class="favourites-list"></div>
       </section>
 
@@ -436,6 +441,17 @@
       <label for="quotation-favourite-picker">Reusable line</label>
       <select id="quotation-favourite-picker"><option value="">Choose a favourite line</option></select>
       <button type="button" id="btn-insert-quotation-favourite" class="btn-secondary" style="width:auto;">Add to quotation</button>
+    </div>
+
+    <div class="quotation-template-tools">
+      <label for="quotation-template-picker">Room model or package</label>
+      <select id="quotation-template-picker"><option value="">Choose a saved model or package</option></select>
+      <button type="button" id="btn-insert-quotation-template" class="btn-secondary" style="width:auto;">Import into quotation</button>
+      <label for="quotation-section-picker">Section / room</label>
+      <select id="quotation-section-picker"><option value="">No sections yet</option></select>
+      <button type="button" id="btn-duplicate-quotation-section" class="btn-secondary" style="width:auto;">Duplicate section</button>
+      <button type="button" id="btn-save-room-model" class="btn-secondary" style="width:auto;">Save section as room model</button>
+      <button type="button" id="btn-save-quotation-package" class="btn-secondary" style="width:auto;">Save all lines as quotation package</button>
     </div>
 
     <div class="totals-box">

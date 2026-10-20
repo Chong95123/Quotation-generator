@@ -5,6 +5,7 @@ let dashboardProfitSummaries = new Map();
 let dashboardLoadToken = 0;
 const PROJECT_HEALTH_THRESHOLDS = { healthyMargin: 20, dangerMargin: 10 };
 const FAVORITES_STORAGE_PREFIX = "quotation-system-favorites:";
+let quotationTemplates = [];
 
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkUser();
@@ -82,6 +83,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (page === "favourites") {
         loadFavourites();
+        loadQuotationTemplates();
       }
     });
   });
@@ -132,6 +134,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("dashboard-project-list").classList.remove("hidden");
   });
 
+  const quotationContainer = document.getElementById("quotation-form-container");
+  quotationContainer?.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    if (button.id === "btn-save-room-model") saveQuotationTemplate("room");
+    if (button.id === "btn-save-quotation-package") saveQuotationTemplate("package");
+    if (button.id === "btn-duplicate-quotation-section") duplicateQuotationSection();
+    if (button.id === "btn-insert-quotation-template") insertSelectedQuotationTemplate();
+  });
+
+  quotationContainer?.addEventListener("change", event => {
+    if (event.target.matches(".item-section")) refreshQuotationSectionPicker();
+  });
+
+  document.getElementById("quotation-templates-list")?.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const template = quotationTemplates.find(item => item.id === button.dataset.templateId);
+    if (!template) return;
+    if (button.dataset.templateAction === "edit") openQuotationTemplateEditor(button.closest(".quotation-template-card"), template);
+    if (button.dataset.templateAction === "delete") deleteQuotationTemplate(template);
+  });
+
   // ===== Company form =====
   document.getElementById("company-logo")?.addEventListener("change", function () {
     previewImage(this, "logo-preview");
@@ -165,6 +190,7 @@ function showApp(user) {
   document.getElementById("app").classList.remove("hidden");
   document.getElementById("current-user-email").textContent = user.email;
   refreshFavoritePickers();
+  loadQuotationTemplates();
   loadDashboardStats();
 }
 
@@ -542,6 +568,281 @@ function loadFavourites() {
     card.append(title, section, description, details, actions);
     list.appendChild(card);
   });
+}
+
+async function loadQuotationTemplates() {
+  const list = document.getElementById("quotation-templates-list");
+  const message = document.getElementById("quotation-templates-message");
+  if (!list || !activeUserId) return;
+
+  const { data, error } = await supabaseClient
+    .from("quotation_templates")
+    .select("id, name, template_type, section_name, items, created_at, updated_at")
+    .eq("user_id", activeUserId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error("Could not load quotation models:", error);
+    quotationTemplates = [];
+    list.innerHTML = "<div class='empty-state'>Room models and packages could not be loaded.</div>";
+    if (message) message.textContent = "Run quotation-library-setup.sql in Supabase to enable this library.";
+    refreshQuotationTemplatePicker();
+    return;
+  }
+
+  quotationTemplates = data || [];
+  if (message) message.textContent = "";
+  renderQuotationTemplates();
+  refreshQuotationTemplatePicker();
+}
+
+function refreshQuotationTemplatePicker() {
+  const picker = document.getElementById("quotation-template-picker");
+  if (!picker) return;
+  const selected = picker.value;
+  picker.replaceChildren(new Option("Choose a saved model or package", ""));
+  quotationTemplates.forEach(template => {
+    const typeLabel = template.template_type === "room" ? "Room model" : "Package";
+    picker.add(new Option(`${typeLabel}: ${template.name}`, template.id));
+  });
+  if (quotationTemplates.some(template => template.id === selected)) picker.value = selected;
+}
+
+function renderQuotationTemplates() {
+  const list = document.getElementById("quotation-templates-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!quotationTemplates.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No room models or packages saved yet. Save a section or all quotation lines from the quotation editor.";
+    list.appendChild(empty);
+    return;
+  }
+
+  quotationTemplates.forEach(template => {
+    const card = document.createElement("article");
+    card.className = "favourite-card quotation-template-card";
+    card.dataset.templateId = template.id;
+    const heading = document.createElement("h3");
+    heading.textContent = template.name;
+    const type = document.createElement("p");
+    type.className = "template-type-badge";
+    type.textContent = template.template_type === "room" ? `Room model${template.section_name ? ` · ${template.section_name}` : ""}` : "Quotation package";
+    const items = Array.isArray(template.items) ? template.items : [];
+    const preview = document.createElement("p");
+    preview.textContent = `${items.length} line(s): ${items.slice(0, 3).map(item => item.item_name || item.description || "Untitled item").join(" · ")}${items.length > 3 ? " …" : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "favourite-actions";
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "btn-secondary";
+    editButton.textContent = "Edit model";
+    editButton.dataset.templateAction = "edit";
+    editButton.dataset.templateId = template.id;
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "btn-delete";
+    deleteButton.textContent = "Remove";
+    deleteButton.dataset.templateAction = "delete";
+    deleteButton.dataset.templateId = template.id;
+    actions.append(editButton, deleteButton);
+    card.append(heading, type, preview, actions);
+    list.appendChild(card);
+  });
+}
+
+function quotationEditorItems(sectionFilter = null) {
+  return [...document.querySelectorAll("#items-body tr")].map((row, index) => ({
+    section: row.querySelector(".item-section")?.value.trim() || "General",
+    item_name: row.querySelector(".item-name")?.value.trim() || "",
+    description: row.querySelector(".item-desc")?.value.trim() || "",
+    unit: row.querySelector(".item-unit")?.value.trim() || "pcs",
+    quantity: Number(row.querySelector(".item-qty")?.value) || 0,
+    unit_cost: Number(row.querySelector(".item-cost")?.value) || 0,
+    unit_price: Number(row.querySelector(".item-price")?.value) || 0,
+    sort_order: index
+  })).filter(item => (item.item_name || item.description)
+    && (!sectionFilter || item.section === sectionFilter));
+}
+
+function refreshQuotationSectionPicker() {
+  const picker = document.getElementById("quotation-section-picker");
+  if (!picker) return;
+  const current = picker.value;
+  const sections = [...new Set([...document.querySelectorAll("#items-body .item-section")]
+    .map(input => input.value.trim()).filter(Boolean))];
+  picker.replaceChildren(new Option(sections.length ? "Choose a section" : "No sections yet", ""));
+  sections.forEach(section => picker.add(new Option(section, section)));
+  if (sections.includes(current)) picker.value = current;
+}
+
+async function saveQuotationTemplate(templateType) {
+  if (!activeUserId) return alert("Please sign in to save quotation models.");
+  refreshQuotationSectionPicker();
+  const sectionPicker = document.getElementById("quotation-section-picker");
+  const selectedSection = sectionPicker?.value || "";
+  if (templateType === "room" && !selectedSection) {
+    refreshQuotationSectionPicker();
+    return alert("Choose a section that has quotation lines first.");
+  }
+  const items = quotationEditorItems(templateType === "room" ? selectedSection : null);
+  if (!items.length) return alert("Add at least one item before saving this model.");
+
+  const suggestedName = templateType === "room" ? selectedSection : "Full quotation package";
+  const name = prompt(templateType === "room" ? "Name this room model:" : "Name this quotation package:", suggestedName);
+  if (name === null || !name.trim()) return;
+  const { error } = await supabaseClient.from("quotation_templates").insert([{
+    user_id: activeUserId,
+    name: name.trim(),
+    template_type: templateType,
+    section_name: templateType === "room" ? selectedSection : null,
+    items
+  }]);
+  if (error) return alert("Could not save the model. Run quotation-library-setup.sql in Supabase first: " + error.message);
+  await loadQuotationTemplates();
+  alert(templateType === "room" ? "Room model saved to your library." : "Quotation package saved to your library.");
+}
+
+function duplicateQuotationSection() {
+  refreshQuotationSectionPicker();
+  const sourceSection = document.getElementById("quotation-section-picker")?.value;
+  if (!sourceSection) return alert("Choose a section to duplicate.");
+  const items = quotationEditorItems(sourceSection);
+  if (!items.length) return alert("There are no items in that section.");
+  const destinationSection = prompt(`Copy ${items.length} line(s) into a new section named:`, `${sourceSection} (Copy)`);
+  if (destinationSection === null || !destinationSection.trim()) return;
+  items.forEach(item => addItemRow({ ...item, section: destinationSection.trim() }));
+  updateQuotationTotal();
+  refreshQuotationSectionPicker();
+}
+
+function insertSelectedQuotationTemplate() {
+  const templateId = document.getElementById("quotation-template-picker")?.value;
+  const template = quotationTemplates.find(item => item.id === templateId);
+  if (!template) return alert("Choose a room model or package first.");
+  const items = Array.isArray(template.items) ? template.items : [];
+  if (!items.length) return alert("This saved model has no quotation lines.");
+
+  let destinationSection = "";
+  if (template.template_type === "room") {
+    destinationSection = prompt("Name the room or section to add:", template.section_name || template.name);
+    if (destinationSection === null || !destinationSection.trim()) return;
+  }
+  if (!confirm(`Import ${items.length} line(s) from “${template.name}” into this quotation? The imported lines can be edited independently.`)) return;
+  items.forEach(item => addItemRow({
+    ...item,
+    section: template.template_type === "room" ? destinationSection.trim() : (item.section || "General")
+  }));
+  updateQuotationTotal();
+  refreshQuotationSectionPicker();
+}
+
+async function deleteQuotationTemplate(template) {
+  if (!confirm(`Remove “${template.name}” from the library?`)) return;
+  const { error } = await supabaseClient.from("quotation_templates")
+    .delete().eq("id", template.id).eq("user_id", activeUserId);
+  if (error) return alert("Could not remove this saved model: " + error.message);
+  await loadQuotationTemplates();
+}
+
+function createTemplateEditorRow(item = {}) {
+  const row = document.createElement("tr");
+  row.className = "template-item-row";
+  const fields = [
+    ["section", "Section", item.section || "General", "text"],
+    ["item_name", "Item", item.item_name || "", "text"],
+    ["description", "Description", item.description || "", "textarea"],
+    ["unit", "Unit", item.unit || "pcs", "text"],
+    ["quantity", "Qty", item.quantity ?? 1, "number"],
+    ["unit_cost", "Unit cost", item.unit_cost ?? 0, "number"],
+    ["unit_price", "Unit price", item.unit_price ?? 0, "number"]
+  ];
+  fields.forEach(([name, label, value, type]) => {
+    const cell = document.createElement("td");
+    const input = type === "textarea" ? document.createElement("textarea") : document.createElement("input");
+    if (type !== "textarea") input.type = type;
+    input.className = `template-${name}`;
+    input.setAttribute("aria-label", label);
+    input.value = value;
+    if (type === "number") { input.min = "0"; input.step = "0.01"; }
+    cell.appendChild(input);
+    row.appendChild(cell);
+  });
+  const actions = document.createElement("td");
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn-delete template-remove-row";
+  remove.textContent = "×";
+  remove.addEventListener("click", () => row.remove());
+  actions.appendChild(remove);
+  row.appendChild(actions);
+  return row;
+}
+
+function openQuotationTemplateEditor(card, template) {
+  card.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = `Edit ${template.template_type === "room" ? "room model" : "quotation package"}`;
+  const form = document.createElement("form");
+  form.className = "quotation-template-edit-form";
+  const name = document.createElement("input");
+  name.name = "name";
+  name.required = true;
+  name.value = template.name;
+  name.setAttribute("aria-label", "Template name");
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Name";
+  nameLabel.appendChild(name);
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "table-responsive";
+  const table = document.createElement("table");
+  table.className = "template-edit-table";
+  table.innerHTML = "<thead><tr><th>Section</th><th>Item</th><th>Description</th><th>Unit</th><th>Qty</th><th>Unit cost</th><th>Unit price</th><th></th></tr></thead><tbody></tbody>";
+  const body = table.querySelector("tbody");
+  (Array.isArray(template.items) ? template.items : []).forEach(item => body.appendChild(createTemplateEditorRow(item)));
+  tableWrap.appendChild(table);
+  const actions = document.createElement("div");
+  actions.className = "favourite-actions template-edit-actions";
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "btn-secondary";
+  add.textContent = "+ Add line";
+  add.addEventListener("click", () => body.appendChild(createTemplateEditorRow()));
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "btn-primary";
+  save.textContent = "Save changes";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn-secondary";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", loadQuotationTemplates);
+  actions.append(add, save, cancel);
+  form.append(nameLabel, tableWrap, actions);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const updatedItems = [...body.querySelectorAll(".template-item-row")].map((row, index) => ({
+      section: row.querySelector(".template-section").value.trim() || "General",
+      item_name: row.querySelector(".template-item_name").value.trim(),
+      description: row.querySelector(".template-description").value.trim(),
+      unit: row.querySelector(".template-unit").value.trim() || "pcs",
+      quantity: Number(row.querySelector(".template-quantity").value) || 0,
+      unit_cost: Number(row.querySelector(".template-unit_cost").value) || 0,
+      unit_price: Number(row.querySelector(".template-unit_price").value) || 0,
+      sort_order: index
+    })).filter(item => item.item_name || item.description);
+    if (!updatedItems.length) return alert("Keep at least one line with an item name or description.");
+    const { error } = await supabaseClient.from("quotation_templates").update({
+      name: name.value.trim(),
+      section_name: template.template_type === "room" ? updatedItems[0].section : template.section_name,
+      items: updatedItems,
+      updated_at: new Date().toISOString()
+    }).eq("id", template.id).eq("user_id", activeUserId);
+    if (error) return alert("Could not update this template: " + error.message);
+    await loadQuotationTemplates();
+  });
+  card.append(heading, form);
 }
 
 function openFavoriteEditor(card, favorite) {
@@ -1059,6 +1360,8 @@ function openQuotationForm() {
   document.getElementById("items-body").innerHTML = "";
   addItemRow();
   updateQuotationTotal();
+  refreshQuotationTemplatePicker();
+  refreshQuotationSectionPicker();
 }
 
 function closeQuotationForm() {
@@ -1107,7 +1410,9 @@ function addItemRow(item = null) {
   const trackedFields = [...tr.querySelectorAll("input, textarea")].filter(field => !field.classList.contains("item-amount"));
   tr.dataset.originalValues = JSON.stringify(trackedFields.map(field => field.value));
   trackedFields.forEach(field => field.addEventListener("input", updateQuotationLineIndicators));
+  tr.querySelector(".item-section").addEventListener("change", refreshQuotationSectionPicker);
   updateQuotationLineIndicators();
+  refreshQuotationSectionPicker();
 
   const qtyInput = tr.querySelector(".item-qty");
   const priceInput = tr.querySelector(".item-price");
@@ -1128,6 +1433,7 @@ function addItemRow(item = null) {
     tr.remove();
     updateQuotationTotal();
     updateQuotationLineIndicators();
+    refreshQuotationSectionPicker();
   });
   tr.querySelector(".btn-save-favorite").addEventListener("click", () => saveFavoriteFromRow("quotation", tr));
 }
@@ -1644,6 +1950,17 @@ function closeViewQuotation() {
         <button type="button" id="btn-insert-quotation-favourite" class="btn-secondary" style="width:auto;">Add to quotation</button>
       </div>
 
+      <div class="quotation-template-tools">
+        <label for="quotation-template-picker">Room model or package</label>
+        <select id="quotation-template-picker"><option value="">Choose a saved model or package</option></select>
+        <button type="button" id="btn-insert-quotation-template" class="btn-secondary" style="width:auto;">Import into quotation</button>
+        <label for="quotation-section-picker">Section / room</label>
+        <select id="quotation-section-picker"><option value="">No sections yet</option></select>
+        <button type="button" id="btn-duplicate-quotation-section" class="btn-secondary" style="width:auto;">Duplicate section</button>
+        <button type="button" id="btn-save-room-model" class="btn-secondary" style="width:auto;">Save section as room model</button>
+        <button type="button" id="btn-save-quotation-package" class="btn-secondary" style="width:auto;">Save all lines as quotation package</button>
+      </div>
+
     <div class="totals-box">
       <div class="total-row">
         <span>Total Amount:</span>
@@ -1664,6 +1981,8 @@ function closeViewQuotation() {
   document.getElementById("btn-replace-all-quotation-text").addEventListener("click", replaceAllQuotationText);
   document.getElementById("btn-insert-quotation-favourite").addEventListener("click", () => insertSelectedFavorite("quotation"));
   refreshFavoritePickers();
+  refreshQuotationTemplatePicker();
+  refreshQuotationSectionPicker();
 }
 
 
