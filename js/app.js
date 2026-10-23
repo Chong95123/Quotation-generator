@@ -6,6 +6,8 @@ let dashboardLoadToken = 0;
 const PROJECT_HEALTH_THRESHOLDS = { healthyMargin: 20, dangerMargin: 10 };
 const FAVORITES_STORAGE_PREFIX = "quotation-system-favorites:";
 let quotationTemplates = [];
+let pendingExcelImportRows = [];
+let pendingExcelImportFileName = "";
 
 document.addEventListener("DOMContentLoaded", async () => {
   const user = await checkUser();
@@ -182,6 +184,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     await saveProject();
   });
+
+  wireExcelImporter();
 });
 
 function showApp(user) {
@@ -505,6 +509,260 @@ function saveFavorites(favorites) {
   }
 }
 
+function refreshExcelPackagePicker() {
+  const picker = document.getElementById("excel-package-target");
+  if (!picker) return;
+  const selected = picker.value;
+  const packages = quotationTemplates.filter(template => template.template_type === "package");
+  picker.replaceChildren(new Option(packages.length ? "Choose a package" : "No saved packages yet", ""));
+  packages.forEach(template => picker.add(new Option(template.name, template.id)));
+  if (packages.some(template => template.id === selected)) picker.value = selected;
+}
+
+function updateExcelImportModeUi() {
+  const mode = document.getElementById("excel-import-mode")?.value || "favorites";
+  document.getElementById("excel-package-name-wrap")?.classList.toggle("hidden", mode !== "new-package");
+  document.getElementById("excel-package-target-wrap")?.classList.toggle("hidden", mode !== "update-package");
+  document.getElementById("excel-update-favorites-wrap")?.classList.toggle("hidden", mode !== "favorites");
+  const confirmButton = document.getElementById("confirm-excel-import");
+  if (confirmButton) {
+    confirmButton.textContent = mode === "favorites" ? "Import favorite lines"
+      : mode === "new-package" ? "Create quotation package" : "Replace package lines";
+    confirmButton.classList.toggle("btn-danger", mode === "update-package");
+  }
+  refreshExcelPackagePicker();
+}
+
+function clearExcelImportPreview(message = "") {
+  pendingExcelImportRows = [];
+  pendingExcelImportFileName = "";
+  document.getElementById("excel-import-preview")?.classList.add("hidden");
+  const confirmButton = document.getElementById("confirm-excel-import");
+  confirmButton?.classList.add("hidden");
+  if (confirmButton) confirmButton.disabled = false;
+  const status = document.getElementById("excel-import-status");
+  if (status) status.textContent = message;
+}
+
+function normalizeExcelHeader(value) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseExcelNumber(value, fallback = null) {
+  if (value === null || value === undefined || String(value).trim() === "") return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const cleaned = String(value).replace(/,/g, "").replace(/\bRM\b/gi, "").replace(/[^0-9.\-]/g, "").trim();
+  if (!cleaned || cleaned === "-" || cleaned === ".") return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function readQuotationExcel(file) {
+  if (!window.XLSX) throw new Error("Excel reader did not load. Check your internet connection and refresh the app.");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!firstSheet) throw new Error("The workbook has no worksheets.");
+  const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", raw: false });
+  const headerIndex = rows.findIndex(row => row.some(cell => String(cell ?? "").trim() !== ""));
+  if (headerIndex < 0) throw new Error("The first worksheet is empty.");
+  const headers = rows[headerIndex].map(normalizeExcelHeader);
+  const findColumn = aliases => headers.findIndex(header => aliases.includes(header));
+  const columns = {
+    external_id: findColumn(["lineid", "itemid", "favoriteid", "favouriteid", "referenceid", "itemcode"]),
+    section: findColumn(["section", "room", "area", "category", "zone"]),
+    item_name: findColumn(["itemname", "item", "name", "lineitem", "workitem"]),
+    description: findColumn(["description", "details", "specification", "scope", "workdescription"]),
+    unit: findColumn(["unit", "uom", "unitofmeasure"]),
+    quantity: findColumn(["quantity", "qty"]),
+    unit_cost: findColumn(["unitcost", "unitcostrm", "cost", "costrm", "costprice", "purchaseprice"]),
+    unit_price: findColumn(["unitprice", "unitpricerm", "sellingprice", "sellingpricerm", "price", "pricerm", "rate"]),
+    amount: findColumn(["amount", "amountrm", "totalamount", "totalamountrm", "lineamount"])
+  };
+  if (columns.item_name < 0 && columns.description < 0) {
+    throw new Error("Could not find an Item Name or Description column. Use the Excel template to check your headings.");
+  }
+  const get = (row, key) => columns[key] < 0 ? "" : (row[columns[key]] ?? "");
+  const parsedRows = [];
+  const sourceIds = new Set();
+  for (let index = headerIndex + 1; index < rows.length; index++) {
+    const row = rows[index];
+    if (!row.some(cell => String(cell ?? "").trim() !== "")) continue;
+    const itemName = String(get(row, "item_name")).trim();
+    const description = String(get(row, "description")).trim();
+    const quantity = parseExcelNumber(get(row, "quantity"), 1);
+    const unitCost = parseExcelNumber(get(row, "unit_cost"), 0);
+    const amount = parseExcelNumber(get(row, "amount"), null);
+    let unitPrice = parseExcelNumber(get(row, "unit_price"), null);
+    if (unitPrice === null && amount !== null && quantity > 0) unitPrice = amount / quantity;
+    if (unitPrice === null) unitPrice = 0;
+    const externalId = String(get(row, "external_id")).trim();
+    let error = "";
+    if (!itemName && !description) error = "Enter an item name or description";
+    else if (quantity === null || unitCost === null || unitPrice === null || quantity < 0 || unitCost < 0 || unitPrice < 0) {
+      error = "Quantity and prices must be valid non-negative numbers";
+    } else if (externalId && sourceIds.has(externalId)) error = `Duplicate Line ID “${externalId}” in this sheet`;
+    if (externalId) sourceIds.add(externalId);
+    parsedRows.push({
+      sourceRow: index + 1,
+      error,
+      item: {
+        external_id: externalId || null,
+        section: String(get(row, "section")).trim() || "General",
+        item_name: itemName,
+        description,
+        unit: String(get(row, "unit")).trim() || "pcs",
+        quantity: quantity ?? 1,
+        unit_cost: unitCost ?? 0,
+        unit_price: unitPrice ?? 0
+      }
+    });
+  }
+  return parsedRows;
+}
+
+function renderExcelImportPreview(parsedRows) {
+  const preview = document.getElementById("excel-import-preview");
+  const confirmButton = document.getElementById("confirm-excel-import");
+  const validRows = parsedRows.filter(row => !row.error);
+  pendingExcelImportRows = validRows.map(row => row.item);
+  preview.classList.remove("hidden");
+  const previewRows = parsedRows.slice(0, 12);
+  preview.innerHTML = `
+    <p><strong>${validRows.length}</strong> valid line(s), <strong>${parsedRows.length - validRows.length}</strong> row(s) needing correction. Showing up to 12 rows.</p>
+    <table class="excel-import-table"><thead><tr><th>Excel row</th><th>Section</th><th>Item name</th><th>Description</th><th>Unit</th><th>Qty</th><th>Unit cost</th><th>Unit price</th><th>Check</th></tr></thead>
+      <tbody>${previewRows.map(row => `<tr>
+        <td>${row.sourceRow}</td><td>${dashboardEscape(row.item.section)}</td><td>${dashboardEscape(row.item.item_name)}</td>
+        <td>${dashboardEscape(row.item.description)}</td><td>${dashboardEscape(row.item.unit)}</td><td>${row.item.quantity}</td>
+        <td>${row.item.unit_cost.toFixed(2)}</td><td>${row.item.unit_price.toFixed(2)}</td>
+        <td class="${row.error ? "excel-import-invalid" : ""}">${dashboardEscape(row.error || "Ready")}</td>
+      </tr>`).join("")}</tbody></table>`;
+  confirmButton.classList.toggle("hidden", validRows.length === 0);
+  confirmButton.disabled = validRows.length === 0;
+  const status = document.getElementById("excel-import-status");
+  status.textContent = `${pendingExcelImportFileName} · First worksheet · ${validRows.length} line(s) ready to import.`;
+}
+
+function downloadQuotationExcelTemplate() {
+  if (!window.XLSX) return alert("Excel template could not be created. Check your internet connection and refresh the app.");
+  const headers = ["Line ID", "Section", "Item Name", "Description", "Unit", "Quantity", "Unit Cost (RM)", "Unit Price (RM)"];
+  const sheet = XLSX.utils.aoa_to_sheet([headers]);
+  sheet["!cols"] = [{ wch: 20 }, { wch: 20 }, { wch: 26 }, { wch: 52 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 18 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Quotation Lines");
+  XLSX.writeFile(workbook, "quotation-import-template.xlsx");
+}
+
+function wireExcelImporter() {
+  const modePicker = document.getElementById("excel-import-mode");
+  const filePicker = document.getElementById("excel-import-file");
+  if (!modePicker || !filePicker) return;
+  modePicker.addEventListener("change", updateExcelImportModeUi);
+  document.getElementById("download-excel-template")?.addEventListener("click", downloadQuotationExcelTemplate);
+  filePicker.addEventListener("change", () => clearExcelImportPreview(filePicker.files[0]?.name ? `Selected ${filePicker.files[0].name}. Choose Preview Excel to inspect the rows.` : ""));
+  document.getElementById("preview-excel-import")?.addEventListener("click", async () => {
+    const file = filePicker.files[0];
+    if (!file) return clearExcelImportPreview("Choose an Excel file first.");
+    if (!/\.xlsx?$/i.test(file.name)) return clearExcelImportPreview("Choose an .xlsx or .xls workbook.");
+    clearExcelImportPreview("Reading the first worksheet…");
+    pendingExcelImportFileName = file.name;
+    try {
+      const parsedRows = await readQuotationExcel(file);
+      if (!parsedRows.length) return clearExcelImportPreview("No quotation lines found below the header row.");
+      renderExcelImportPreview(parsedRows);
+    } catch (error) {
+      clearExcelImportPreview(error.message || "Could not read this workbook.");
+    }
+  });
+  document.getElementById("confirm-excel-import")?.addEventListener("click", async () => {
+    if (!activeUserId) return alert("Please sign in before importing lines.");
+    if (!pendingExcelImportRows.length) return;
+    const mode = modePicker.value;
+    const importedItems = pendingExcelImportRows.map((item, index) => ({ ...item, sort_order: index }));
+    const confirmButton = document.getElementById("confirm-excel-import");
+    confirmButton.disabled = true;
+    const status = document.getElementById("excel-import-status");
+    status.textContent = "Importing…";
+    if (mode === "favorites") {
+      const favorites = getFavorites();
+      const updateMatches = document.getElementById("excel-update-favorites").checked;
+      const existingByExternalId = new Map(favorites.filter(item => item.external_id).map(item => [String(item.external_id), item.id]));
+      let added = 0;
+      let updated = 0;
+      importedItems.forEach((item, index) => {
+        const matchedId = updateMatches && item.external_id ? existingByExternalId.get(String(item.external_id)) : null;
+        const existing = matchedId ? favorites.find(favorite => favorite.id === matchedId) : null;
+        if (existing) {
+          Object.assign(existing, item, { name: item.item_name || item.description });
+          updated++;
+        } else {
+          const newFavorite = { ...item, id: `fav-import-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, name: item.item_name || item.description };
+          favorites.push(newFavorite);
+          if (item.external_id) existingByExternalId.set(String(item.external_id), newFavorite.id);
+          added++;
+        }
+      });
+      try {
+        localStorage.setItem(favoriteStorageKey(), JSON.stringify(favorites));
+        refreshFavoritePickers();
+        loadFavourites();
+        clearExcelImportPreview(`Imported ${added} favorite line(s)${updated ? ` and updated ${updated} matching line(s)` : ""}.`);
+        filePicker.value = "";
+      } catch (error) {
+        console.error("Excel favourite import failed:", error);
+        status.textContent = "Could not save these lines in this browser. Try a smaller workbook.";
+        confirmButton.disabled = false;
+      }
+      return;
+    }
+
+    if (mode === "new-package") {
+      const name = document.getElementById("excel-package-name").value.trim();
+      if (!name) {
+        status.textContent = "Enter a name for the new quotation package.";
+        confirmButton.disabled = false;
+        return;
+      }
+      const { error } = await supabaseClient.from("quotation_templates").insert([{
+        user_id: activeUserId, name, template_type: "package", section_name: null, items: importedItems
+      }]);
+      if (error) {
+        status.textContent = "Could not create the package: " + error.message;
+        confirmButton.disabled = false;
+        return;
+      }
+      await loadQuotationTemplates();
+      clearExcelImportPreview(`Created quotation package “${name}” with ${importedItems.length} line(s).`);
+      filePicker.value = "";
+      return;
+    }
+
+    const templateId = document.getElementById("excel-package-target").value;
+    const template = quotationTemplates.find(item => item.id === templateId && item.template_type === "package");
+    if (!template) {
+      status.textContent = "Choose a saved quotation package to update.";
+      confirmButton.disabled = false;
+      return;
+    }
+    if (!confirm(`Replace all ${Array.isArray(template.items) ? template.items.length : 0} line(s) in “${template.name}” with ${importedItems.length} imported line(s)?`)) {
+      confirmButton.disabled = false;
+      status.textContent = "Import cancelled. The saved package was not changed.";
+      return;
+    }
+    const { error } = await supabaseClient.from("quotation_templates")
+      .update({ items: importedItems, updated_at: new Date().toISOString() })
+      .eq("id", template.id).eq("user_id", activeUserId);
+    if (error) {
+      status.textContent = "Could not update the package: " + error.message;
+      confirmButton.disabled = false;
+      return;
+    }
+    await loadQuotationTemplates();
+    clearExcelImportPreview(`Updated “${template.name}” with ${importedItems.length} line(s).`);
+    filePicker.value = "";
+  });
+  updateExcelImportModeUi();
+}
+
 function refreshFavoritePickers() {
   const favorites = getFavorites();
   ["quotation-favourite-picker", "vo-favourite-picker"].forEach(id => {
@@ -587,6 +845,7 @@ async function loadQuotationTemplates() {
     list.innerHTML = "<div class='empty-state'>Room models and packages could not be loaded.</div>";
     if (message) message.textContent = "Run quotation-library-setup.sql in Supabase to enable this library.";
     refreshQuotationTemplatePicker();
+    refreshExcelPackagePicker();
     return;
   }
 
@@ -594,6 +853,7 @@ async function loadQuotationTemplates() {
   if (message) message.textContent = "";
   renderQuotationTemplates();
   refreshQuotationTemplatePicker();
+  refreshExcelPackagePicker();
 }
 
 function refreshQuotationTemplatePicker() {

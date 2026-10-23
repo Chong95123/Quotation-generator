@@ -261,6 +261,39 @@
         <h2>Favourites Library</h2>
         <p class="page-desc">Save a line from a quotation or variation order with the ☆ button, then reuse it from the editor.</p>
         <p class="favourites-storage-note">Favourites are saved in this browser for the signed-in account.</p>
+        <section class="excel-import-panel" aria-labelledby="excel-import-heading">
+          <div class="excel-import-heading">
+            <div><h3 id="excel-import-heading">Import from Excel</h3>
+              <p>Use the template, fill in your quotation lines, then preview them before importing.</p></div>
+            <button type="button" id="download-excel-template" class="btn-secondary" style="width:auto;">Download Excel template</button>
+          </div>
+          <div class="excel-import-form">
+            <label>Import as
+              <select id="excel-import-mode">
+                <option value="favorites">Individual favorite lines</option>
+                <option value="new-package">Create a new quotation package</option>
+                <option value="update-package">Replace lines in an existing quotation package</option>
+              </select>
+            </label>
+            <label id="excel-package-name-wrap" class="hidden">Package name
+              <input type="text" id="excel-package-name" maxlength="120" placeholder="e.g. 3 Bedroom Renovation">
+            </label>
+            <label id="excel-package-target-wrap" class="hidden">Quotation package to update
+              <select id="excel-package-target"><option value="">No saved packages yet</option></select>
+            </label>
+            <label class="excel-file-label">Excel file (.xlsx or .xls)
+              <input type="file" id="excel-import-file" accept=".xlsx,.xls">
+            </label>
+            <label id="excel-update-favorites-wrap" class="excel-import-check">
+              <input type="checkbox" id="excel-update-favorites" checked>
+              Update an existing favorite when its Excel “Line ID” matches
+            </label>
+            <button type="button" id="preview-excel-import" class="btn-secondary" style="width:auto;">Preview Excel</button>
+          </div>
+          <div id="excel-import-status" class="excel-import-status" role="status" aria-live="polite"></div>
+          <div id="excel-import-preview" class="excel-import-preview hidden"></div>
+          <button type="button" id="confirm-excel-import" class="btn-primary hidden" style="width:auto; margin-top:12px;">Import rows</button>
+        </section>
         <h3 class="favourites-section-title">Saved Room Models &amp; Quotation Packages</h3>
         <p class="page-desc">Room models and packages sync to your account. Edit a saved model here, then import it into a quotation.</p>
         <div id="quotation-templates-message" class="favourites-storage-note"></div>
@@ -473,6 +506,7 @@
 
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
